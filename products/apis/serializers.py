@@ -17,7 +17,7 @@ class SuitableLocationSerializer(serializers.ModelSerializer):
 class ProductImageSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProductImage
-        fields = ["id", "url", "alt_text", "is_primary"]
+        fields = ["id", "url","image","alt_text", "is_primary"]
 
 
 class ProductListSerializer(serializers.ModelSerializer):
