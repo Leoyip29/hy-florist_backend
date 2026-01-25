@@ -23,6 +23,9 @@ class Product(WithTimeStamps):
     description = models.TextField(blank=True)
     price = models.DecimalField(max_digits=10, decimal_places=2)
 
+    # Hot seller flag - shows products at top when sorting by hot selling
+    is_hot_seller = models.BooleanField(default=False)
+
     # Relationships
     categories = models.ManyToManyField(ProductCategory, related_name='products')
     suitable_locations = models.ManyToManyField(SuitableLocation, related_name='products')
