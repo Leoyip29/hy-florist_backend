@@ -16,7 +16,7 @@ class ProductListAPIView(ListAPIView):
 class ProductByIdsAPIView(ListAPIView):
     """
     API endpoint to fetch products by specific IDs.
-    Usage: /api/products/by-ids/?ids=1,2,3,4,5,6
+    Usage: /apis/products/by-ids/?ids=1,2,3,4,5,6
     """
     serializer_class = ProductListSerializer
 
