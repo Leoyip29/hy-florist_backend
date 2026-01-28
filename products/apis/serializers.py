@@ -32,6 +32,7 @@ class ProductListSerializer(serializers.ModelSerializer):
             "name",
             "description",
             "price",
+            "is_hot_seller",
             "categories",
             "suitable_locations",
             "images",
