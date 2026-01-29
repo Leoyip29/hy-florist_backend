@@ -7,16 +7,21 @@ class ProductListAPIView(ListAPIView):
     serializer_class = ProductListSerializer
 
     def get_queryset(self):
-        return (
-            Product.objects.all()
-            .order_by("-created_at")
-        )
+        queryset = Product.objects.all()
+        sort = self.request.query_params.get('sort', None)
+
+        if sort == 'hot':
+            # Return only hot sellers, ordered by newest first
+            return queryset.filter(is_hot_seller=True).order_by('-created_at')
+
+        # Default: hot sellers first, then by newest
+        return queryset.order_by('-is_hot_seller', '-created_at')
 
 
 class ProductByIdsAPIView(ListAPIView):
     """
     API endpoint to fetch products by specific IDs.
-    Usage: /api/products/by-ids/?ids=1,2,3,4,5,6
+    Usage: /apis/products/by-ids/?ids=1,2,3,4,5,6
     """
     serializer_class = ProductListSerializer
 

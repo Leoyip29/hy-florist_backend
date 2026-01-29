@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>訂單確認</title>
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: #ffffff;
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header {
+            text-align: center;
+            padding-bottom: 30px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+        .header h1 {
+            color: #2c3e50;
+            margin: 0;
+            font-size: 28px;
+            font-weight: 300;
+        }
+        .order-number {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+            text-align: center;
+        }
+        .order-number strong {
+            font-size: 18px;
+            color: #2c3e50;
+        }
+        .section {
+            margin: 30px 0;
+        }
+        .section h2 {
+            color: #2c3e50;
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+        }
+        .info-label {
+            color: #666;
+            font-weight: 500;
+        }
+        .info-value {
+            color: #333;
+            text-align: right;
+        }
+        .items-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        .items-table th {
+            background-color: #f8f9fa;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #2c3e50;
+            border-bottom: 2px solid #e0e0e0;
+        }
+        .items-table td {
+            padding: 12px;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        .item-image {
+            width: 60px;
+            height: 60px;
+            object-fit: cover;
+            border-radius: 4px;
+        }
+        .totals {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 2px solid #e0e0e0;
+        }
+        .total-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            font-size: 16px;
+        }
+        .total-row.grand-total {
+            font-size: 20px;
+            font-weight: 700;
+            color: #2c3e50;
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 2px solid #2c3e50;
+        }
+        .footer {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 2px solid #f0f0f0;
+            text-align: center;
+            color: #666;
+            font-size: 14px;
+        }
+        .footer p {
+            margin: 5px 0;
+        }
+        .button {
+            display: inline-block;
+            padding: 12px 30px;
+            background-color: #2c3e50;
+            color: #ffffff;
+            text-decoration: none;
+            border-radius: 4px;
+            margin: 20px 0;
+            font-weight: 600;
+        }
+        @media only screen and (max-width: 600px) {
+            body {
+                padding: 10px;
+            }
+            .container {
+                padding: 20px;
+            }
+            .items-table {
+                font-size: 14px;
+            }
+            .item-image {
+                width: 40px;
+                height: 40px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>{{ company_name }}</h1>
+            <p>感謝您的訂購</p>
+        </div>
+
+        <div class="order-number">
+            <p style="margin: 0; color: #666;">訂單編號</p>
+            <strong>#{{ order.order_number }}</strong>
+        </div>
+
+        <!-- Customer Information -->
+        <div class="section">
+            <h2>客戶資料</h2>
+            <div class="info-row">
+                <span class="info-label">姓名：</span>
+                <span class="info-value">{{ order.customer_name }}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">電郵：</span>
+                <span class="info-value">{{ order.customer_email }}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">電話：</span>
+                <span class="info-value">{{ order.customer_phone }}</span>
+            </div>
+        </div>
+
+        <!-- Delivery Information -->
+        <div class="section">
+            <h2>送貨資料</h2>
+            <div class="info-row">
+                <span class="info-label">送貨地址：</span>
+                <span class="info-value">{{ order.delivery_address }}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">送貨日期：</span>
+                <span class="info-value">{{ order.delivery_date|date:"Y年m月d日" }}</span>
+            </div>
+            {% if order.delivery_notes %}
+            <div class="info-row">
+                <span class="info-label">備註：</span>
+                <span class="info-value">{{ order.delivery_notes }}</span>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Order Items -->
+        <div class="section">
+            <h2>訂單詳情</h2>
+            <table class="items-table">
+                <thead>
+                    <tr>
+                        <th>商品</th>
+                        <th>數量</th>
+                        <th>單價</th>
+                        <th>小計</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in items %}
+                    <tr>
+                        <td>
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                {% if item.product_image_url %}
+                                <img src="{{ item.product_image_url }}" alt="{{ item.product_name }}" class="item-image">
+                                {% endif %}
+                                <span>{{ item.product_name }}</span>
+                            </div>
+                        </td>
+                        <td>{{ item.quantity }}</td>
+                        <td>HK${{ item.product_price }}</td>
+                        <td>HK${{ item.line_total }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+
+            <div class="totals">
+                <div class="total-row">
+                    <span>小計：</span>
+                    <span>HK${{ order.subtotal }}</span>
+                </div>
+                {% if order.delivery_fee > 0 %}
+                <div class="total-row">
+                    <span>運費：</span>
+                    <span>HK${{ order.delivery_fee }}</span>
+                </div>
+                {% endif %}
+                {% if order.discount > 0 %}
+                <div class="total-row">
+                    <span>折扣：</span>
+                    <span>-HK${{ order.discount }}</span>
+                </div>
+                {% endif %}
+                <div class="total-row grand-total">
+                    <span>總計：</span>
+                    <span>HK${{ order.total }}</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Payment Information -->
+        <div class="section">
+            <h2>付款資料</h2>
+            <div class="info-row">
+                <span class="info-label">付款方式：</span>
+                <span class="info-value">{{ order.get_payment_method_display }}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">付款狀態：</span>
+                <span class="info-value" style="color: #28a745; font-weight: 600;">已付款</span>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p><strong>{{ company_name }}</strong></p>
+            <p>如有任何查詢，請聯絡我們：{{ support_email }}</p>
+            <p style="margin-top: 20px; color: #999; font-size: 12px;">
+                此郵件為系統自動發送，請勿直接回覆
+            </p>
+        </div>
+    </div>
+</body>
+</html>

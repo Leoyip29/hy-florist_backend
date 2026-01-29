@@ -13,3 +13,6 @@ django-cors-headers==4.9.0
 django-storages==1.14.6
 Pillow==12.1.0
 openpyxl==3.1.5
+requests==2.32.3
+Pillow==12.1.0
+stripe==14.2.0

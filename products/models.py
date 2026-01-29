@@ -23,6 +23,9 @@ class Product(WithTimeStamps):
     description = models.TextField(blank=True)
     price = models.DecimalField(max_digits=10, decimal_places=2)
 
+    # Hot seller flag - shows products at top when sorting by hot selling
+    is_hot_seller = models.BooleanField(default=False)
+
     # Relationships
     categories = models.ManyToManyField(ProductCategory, related_name='products')
     suitable_locations = models.ManyToManyField(SuitableLocation, related_name='products')
@@ -33,7 +36,7 @@ class Product(WithTimeStamps):
 # Product Images Model
 class ProductImage(WithTimeStamps):
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='images')
-    image = models.ImageField(upload_to='products/',null=True)
+    image = models.ImageField(upload_to='products/', null=True)
     url = models.URLField(max_length=1000,null=True)
     alt_text = models.CharField(max_length=255, blank=True)
     is_primary = models.BooleanField(default=False)

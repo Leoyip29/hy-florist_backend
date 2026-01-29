@@ -209,3 +209,9 @@ __marimo__/
 .idea/
 output_dir/
 script.py
+
+# Django Media Files
+media/
+
+# Django Static Files (collected static)
+staticfiles/
