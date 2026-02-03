@@ -3,6 +3,7 @@ from products.models import Product
 from utils.models import WithTimeStamps
 from django.utils import timezone
 
+
 class Order(WithTimeStamps):
     """
     Represents a customer order in the system.
@@ -48,6 +49,10 @@ class Order(WithTimeStamps):
     # Delivery information
     delivery_address = models.TextField(
         help_text="Full delivery address"
+    )
+    delivery_date = models.DateField(
+        help_text="Requested delivery date (must be at least 3 days in advance)",
+        null=True
     )
     delivery_notes = models.TextField(
         blank=True,
@@ -109,11 +114,6 @@ class Order(WithTimeStamps):
         max_digits=10,
         decimal_places=2,
         help_text="Final total amount"
-    )
-    paid_at = models.DateTimeField(
-        blank=True,
-        null=True,
-        help_text="When payment was completed"
     )
 
     paid_at = models.DateTimeField(
@@ -214,7 +214,6 @@ class OrderItem(WithTimeStamps):
         help_text="The product being ordered"
     )
 
-
     # Quantity and pricing
     quantity = models.PositiveIntegerField(
         default=1,
@@ -249,3 +248,34 @@ class OrderItem(WithTimeStamps):
         if not self.line_total or self.line_total == 0:
             self.line_total = self.product_price * self.quantity
         super().save(*args, **kwargs)
+
+
+class StripeWebhookEvent(models.Model):
+    """
+    Records every Stripe webhook event that has been successfully processed.
+    Prevents duplicate processing when Stripe retries delivery.
+    """
+    event_id = models.CharField(
+        max_length=255,
+        unique=True,
+        help_text="Stripe event ID (e.g. evt_1xxxxx)"
+    )
+    event_type = models.CharField(
+        max_length=100,
+        help_text="Stripe event type (e.g. payment_intent.succeeded)"
+    )
+    processed_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="When this event was first processed"
+    )
+
+    class Meta:
+        verbose_name = "Stripe Webhook Event"
+        verbose_name_plural = "Stripe Webhook Events"
+        indexes = [
+            models.Index(fields=['event_id']),
+            models.Index(fields=['-processed_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.event_type} — {self.event_id}"

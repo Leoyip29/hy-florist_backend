@@ -15,7 +15,7 @@ import logging
 from decimal import Decimal
 
 from .serializers import CheckoutSerializer, OrderSerializer
-from ..models import Order
+from ..models import Order, StripeWebhookEvent
 
 # Initialize Stripe
 stripe.api_key = settings.STRIPE_SECRET_KEY
@@ -362,21 +362,20 @@ class OrderDetailView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-
 @method_decorator(csrf_exempt, name='dispatch')
 class StripeWebhookView(APIView):
     """
     Handle Stripe webhook events.
-    This is called by Stripe when payment events occur.
 
-    Security features:
-    - Webhook signature verification
-    - CSRF exemption (verified via signature)
-    - Idempotent order updates
-    - Comprehensive logging
-
-    Note: This provides redundancy in case frontend confirmation fails.
+    Security:
+      • Webhook signature verified via stripe.Webhook.construct_event
+      • CSRF exempt — authentication is the signature itself
+      • GAP 6: every event_id is recorded in StripeWebhookEvent before
+        processing.  Duplicate deliveries are detected and skipped.
     """
+    # Webhooks must NOT be throttled — Stripe controls retry timing.
+    authentication_classes = []
+    permission_classes = []
 
     def post(self, request):
         payload = request.body
@@ -386,7 +385,7 @@ class StripeWebhookView(APIView):
             logger.warning("Webhook received without signature header")
             return HttpResponse('Missing signature', status=400)
 
-        # Verify webhook signature
+        # ── signature verification ────────────────────────────────────────
         try:
             event = stripe.Webhook.construct_event(
                 payload,
@@ -394,95 +393,77 @@ class StripeWebhookView(APIView):
                 settings.STRIPE_WEBHOOK_SECRET
             )
         except ValueError as e:
-            logger.error(f"Invalid webhook payload: {str(e)}")
+            logger.error(f"Invalid webhook payload: {e}")
             return HttpResponse('Invalid payload', status=400)
         except stripe.error.SignatureVerificationError as e:
-            logger.error(f"Invalid webhook signature: {str(e)}")
+            logger.error(f"Invalid webhook signature: {e}")
             return HttpResponse('Invalid signature', status=400)
 
-        # Log webhook event
-        logger.info(f"Webhook received: {event['type']} - {event['id']}")
+        event_id = event['id']
+        event_type = event['type']
 
-        # Handle the event
-        if event['type'] == 'payment_intent.succeeded':
-            payment_intent = event['data']['object']
-            self.handle_payment_success(payment_intent)
+        logger.info(f"Webhook received: {event_type} — {event_id}")
 
-        elif event['type'] == 'payment_intent.payment_failed':
-            payment_intent = event['data']['object']
-            self.handle_payment_failure(payment_intent)
+        # ── GAP 6: deduplication ──────────────────────────────────────────
+        already_processed, _created = StripeWebhookEvent.objects.get_or_create(
+            event_id=event_id,
+            defaults={'event_type': event_type}
+        )
+        if already_processed and not _created:
+            logger.info(f"Webhook event {event_id} already processed — skipping")
+            # Return 200 so Stripe stops retrying
+            return HttpResponse(status=200)
 
-        elif event['type'] == 'charge.refunded':
-            charge = event['data']['object']
-            self.handle_refund(charge)
+        # ── dispatch ──────────────────────────────────────────────────────
+        if event_type == 'payment_intent.succeeded':
+            self.handle_payment_success(event['data']['object'])
+        elif event_type == 'payment_intent.payment_failed':
+            self.handle_payment_failure(event['data']['object'])
+        elif event_type == 'charge.refunded':
+            self.handle_refund(event['data']['object'])
 
         return HttpResponse(status=200)
 
+    # ── handlers ──────────────────────────────────────────────────────────
+
     def handle_payment_success(self, payment_intent):
-        """
-        Handle successful payment.
-        Idempotent - safe to call multiple times.
-        """
-        payment_intent_id = payment_intent['id']
-
+        """Idempotent: marks order as paid if not already."""
+        pi_id = payment_intent['id']
         try:
-            order = Order.objects.get(stripe_payment_intent_id=payment_intent_id)
-
+            order = Order.objects.get(stripe_payment_intent_id=pi_id)
             if order.payment_status != 'paid':
-                order.mark_as_paid(payment_intent_id)
-                logger.info(
-                    f"Webhook: Marked order {order.order_number} as paid via webhook"
-                )
+                order.mark_as_paid(pi_id)
+                logger.info(f"Webhook: marked {order.order_number} as paid")
             else:
-                logger.info(
-                    f"Webhook: Order {order.order_number} already marked as paid"
-                )
-
+                logger.info(f"Webhook: {order.order_number} already paid")
         except Order.DoesNotExist:
             logger.warning(
-                f"Webhook: No order found for Payment Intent {payment_intent_id}. "
-                "Order may not be created yet (frontend confirmation pending)."
+                f"Webhook: no order for PI {pi_id}. "
+                "Frontend confirmation may still be pending."
             )
 
     def handle_payment_failure(self, payment_intent):
-        """Handle failed payment"""
-        payment_intent_id = payment_intent['id']
-
+        pi_id = payment_intent['id']
         try:
-            order = Order.objects.get(stripe_payment_intent_id=payment_intent_id)
-
+            order = Order.objects.get(stripe_payment_intent_id=pi_id)
             if order.payment_status != 'failed':
                 order.payment_status = 'failed'
                 order.status = 'failed'
                 order.save(update_fields=['payment_status', 'status', 'updated_at'])
-
-                logger.warning(
-                    f"Webhook: Marked order {order.order_number} as failed"
-                )
+                logger.warning(f"Webhook: marked {order.order_number} as failed")
         except Order.DoesNotExist:
-            logger.warning(
-                f"Webhook: No order found for failed Payment Intent {payment_intent_id}"
-            )
+            logger.warning(f"Webhook: no order for failed PI {pi_id}")
 
     def handle_refund(self, charge):
-        """Handle refund event"""
-        payment_intent_id = charge.get('payment_intent')
-
-        if not payment_intent_id:
+        pi_id = charge.get('payment_intent')
+        if not pi_id:
             return
-
         try:
-            order = Order.objects.get(stripe_payment_intent_id=payment_intent_id)
-
+            order = Order.objects.get(stripe_payment_intent_id=pi_id)
             if order.payment_status != 'refunded':
                 order.payment_status = 'refunded'
                 order.status = 'refunded'
                 order.save(update_fields=['payment_status', 'status', 'updated_at'])
-
-                logger.info(
-                    f"Webhook: Marked order {order.order_number} as refunded"
-                )
+                logger.info(f"Webhook: marked {order.order_number} as refunded")
         except Order.DoesNotExist:
-            logger.warning(
-                f"Webhook: No order found for refunded Payment Intent {payment_intent_id}"
-            )
+            logger.warning(f"Webhook: no order for refunded PI {pi_id}")

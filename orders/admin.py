@@ -21,6 +21,7 @@ class OrderAdmin(admin.ModelAdmin):
         'customer_email',
         'total',
         'payment_status',
+        'delivery_date',
         'created_at',
     ]
 
