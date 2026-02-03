@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>訂單確認 - HY Florist</title>
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            background-color: #1a1a1a;
+            color: white;
+            padding: 30px 20px;
+            text-align: center;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 300;
+        }
+
+        .content {
+            background-color: #ffffff;
+            padding: 30px 20px;
+        }
+
+        .order-info {
+            background-color: #f5f5f5;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+
+        .order-info h2 {
+            margin-top: 0;
+            color: #1a1a1a;
+            font-size: 18px;
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            margin: 10px 0;
+            padding: 8px 0;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .info-row:last-child {
+            border-bottom: none;
+        }
+
+        .info-label {
+            color: #666;
+        }
+
+        .info-value {
+            font-weight: 600;
+        }
+
+        .items-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+
+        .items-table th {
+            background-color: #f5f5f5;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+        }
+
+        .items-table td {
+            padding: 12px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .total-row {
+            font-weight: 600;
+            font-size: 18px;
+        }
+
+        .button {
+            display: inline-block;
+            background-color: #1a1a1a;
+            color: white;
+            padding: 14px 28px;
+            text-decoration: none;
+            border-radius: 6px;
+            margin: 20px 0;
+        }
+
+        .footer {
+            background-color: #f5f5f5;
+            padding: 20px;
+            text-align: center;
+            color: #666;
+            font-size: 14px;
+        }
+
+        .success-badge {
+            background-color: #10b981;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            display: inline-block;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+<div class="header">
+    <h1>{{ company_name }}</h1>
+    <p>感謝您的訂購</p>
+</div>
+
+<div class="content">
+    <div class="success-badge">
+        ✓ 付款成功
+    </div>
+
+    <h2>您的訂單已確認</h2>
+    <p>親愛的 {{ order.customer_name }}，</p>
+    <p>感謝您在 HY Florist 購物。您的訂單已成功確認，我們將盡快為您處理。</p>
+
+    <div class="order-info">
+        <h2>訂單資料</h2>
+        <div class="info-row">
+            <span class="info-label">訂單編號：</span>
+            <span class="info-value">#{{ order.order_number }}</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">訂單日期：</span>
+            <span class="info-value">{{ order.created_at|date:"Y年m月d日 H:i" }}</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">付款狀態：</span>
+            <span class="info-value" style="color: #10b981;">已付款</span>
+        </div>
+    </div>
+
+    <div class="order-info">
+        <h2>客戶資料</h2>
+        <div class="info-row">
+            <span class="info-label">姓名：</span>
+            <span class="info-value">{{ order.customer_name }}</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">電郵：</span>
+            <span class="info-value">{{ order.customer_email }}</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">電話：</span>
+            <span class="info-value">{{ order.customer_phone }}</span>
+        </div>
+    </div>
+
+    <div class="order-info">
+        <h2>送貨資料</h2>
+        <div class="info-row">
+            <span class="info-label">送貨地址：</span>
+            <span class="info-value">{{ order.delivery_address }}</span>
+        </div>
+        {% if order.delivery_notes %}
+            <div class="info-row">
+                <span class="info-label">備註：</span>
+                <span class="info-value">{{ order.delivery_notes }}</span>
+            </div>
+        {% endif %}
+    </div>
+
+    <h2>訂單詳情</h2>
+    <table class="items-table">
+        <thead>
+        <tr>
+            <th>商品</th>
+            <th style="text-align: center;">數量</th>
+            <th style="text-align: right;">單價</th>
+            <th style="text-align: right;">小計</th>
+        </tr>
+        </thead>
+        <tbody>
+        {% for item in items %}
+            <tr>
+                <td>{{ item.product_name }}</td>
+                <td style="text-align: center;">{{ item.quantity }}</td>
+                <td style="text-align: right;">HK${{ item.product_price }}</td>
+                <td style="text-align: right;">HK${{ item.line_total }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+        <tfoot>
+        <tr>
+            <td colspan="3" style="text-align: right; padding-top: 20px;">小計：</td>
+            <td style="text-align: right; padding-top: 20px;">HK${{ order.subtotal }}</td>
+        </tr>
+        {% if order.delivery_fee > 0 %}
+            <tr>
+                <td colspan="3" style="text-align: right;">運費：</td>
+                <td style="text-align: right;">HK${{ order.delivery_fee }}</td>
+            </tr>
+        {% endif %}
+        {% if order.discount > 0 %}
+            <tr>
+                <td colspan="3" style="text-align: right;">折扣：</td>
+                <td style="text-align: right;">-HK${{ order.discount }}</td>
+            </tr>
+        {% endif %}
+        <tr class="total-row">
+            <td colspan="3" style="text-align: right; border-top: 2px solid #1a1a1a; padding-top: 10px;">總計：</td>
+            <td style="text-align: right; border-top: 2px solid #1a1a1a; padding-top: 10px;">HK${{ order.total }}</td>
+        </tr>
+        </tfoot>
+    </table>
+
+    <p style="color: #666; font-size: 14px; margin-top: 30px;">
+        如有任何查詢，歡迎隨時聯絡我們。<br>
+        電郵：{{ support_email }}<br>
+        感謝您選擇 HY Florist！
+    </p>
+</div>
+
+<div class="footer">
+    <p>&copy; {{ year }} {{ company_name }}. All rights reserved.</p>
+    <p style="font-size: 12px; color: #999;">
+        此為系統自動發送的電郵，請勿直接回覆。
+    </p>
+</div>
+</body>
+</html>

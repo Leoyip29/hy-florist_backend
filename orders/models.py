@@ -1,7 +1,7 @@
 from django.db import models
 from products.models import Product
 from utils.models import WithTimeStamps
-
+from django.utils import timezone
 
 class Order(WithTimeStamps):
     """
@@ -22,6 +22,15 @@ class Order(WithTimeStamps):
         editable=False,
         help_text="Unique order number generated automatically"
     )
+
+    STATUS_CHOICES = [
+        ('pending', 'Pending Payment'),
+        ('processing', 'Processing'),
+        ('completed', 'Completed'),
+        ('failed', 'Failed'),
+        ('cancelled', 'Cancelled'),
+        ('refunded', 'Refunded'),
+    ]
 
     # Customer information (Guest Checkout)
     customer_name = models.CharField(
@@ -69,6 +78,15 @@ class Order(WithTimeStamps):
         help_text="Stripe Payment Intent ID for reference"
     )
 
+    # Order status
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='pending',
+        db_index=True,
+        help_text="Overall order status"
+    )
+
     # Order totals
     subtotal = models.DecimalField(
         max_digits=10,
@@ -98,6 +116,22 @@ class Order(WithTimeStamps):
         help_text="When payment was completed"
     )
 
+    paid_at = models.DateTimeField(
+        blank=True,
+        null=True,
+        help_text="When payment was completed"
+    )
+    payment_verified_at = models.DateTimeField(
+        blank=True,
+        null=True,
+        help_text="When payment was verified with Stripe"
+    )
+    confirmed_at = models.DateTimeField(
+        blank=True,
+        null=True,
+        help_text="When order was confirmed"
+    )
+
     class Meta:
         ordering = ['-created_at']
         verbose_name = "Order"
@@ -123,6 +157,36 @@ class Order(WithTimeStamps):
             self.order_number = f"HYF-{date_str}-{unique_id}"
 
         super().save(*args, **kwargs)
+
+    def mark_as_paid(self, payment_intent_id=None):
+        """
+        Atomically mark order as paid.
+        Idempotent - safe to call multiple times.
+        """
+        if self.payment_status == 'paid':
+            return  # Already paid, nothing to do
+
+        if payment_intent_id and not self.stripe_payment_intent_id:
+            self.stripe_payment_intent_id = payment_intent_id
+
+        self.payment_status = 'paid'
+        self.status = 'processing'
+        self.paid_at = timezone.now()
+        self.payment_verified_at = timezone.now()
+        self.save(update_fields=[
+            'payment_status',
+            'paid_at',
+            'status',
+            'payment_verified_at',
+            'stripe_payment_intent_id',
+            'updated_at'
+        ])
+
+    def confirm_order(self):
+        """Mark order as confirmed after successful payment"""
+        if not self.confirmed_at:
+            self.confirmed_at = timezone.now()
+            self.save(update_fields=['confirmed_at', 'updated_at'])
 
     def calculate_total(self):
         """Calculate and update order total"""
@@ -182,6 +246,6 @@ class OrderItem(WithTimeStamps):
         return f"{self.quantity}x {self.product_name} (Order #{self.order.order_number})"
 
     def save(self, *args, **kwargs):
-        """Calculate line total before saving"""
-        self.line_total = self.product_price * self.quantity
+        if not self.line_total or self.line_total == 0:
+            self.line_total = self.product_price * self.quantity
         super().save(*args, **kwargs)

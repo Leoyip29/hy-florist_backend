@@ -48,7 +48,7 @@ class OrderSerializer(serializers.ModelSerializer):
             'created_at',
             'items',
         ]
-        read_only_fields = ['order_number', 'created_at']
+        read_only_fields = ['order_number', 'created_at','paid_at']
 
 
 class CheckoutSerializer(serializers.Serializer):
@@ -58,13 +58,42 @@ class CheckoutSerializer(serializers.Serializer):
     """
 
     # Customer Information
-    customer_name = serializers.CharField(max_length=255)
-    customer_email = serializers.EmailField()
-    customer_phone = serializers.CharField(max_length=20)
+    customer_name = serializers.CharField(
+        max_length=255,
+        min_length=2,
+        error_messages={
+            'min_length': 'Name must be at least 2 characters',
+            'required': 'Name is required'
+        }
+    )
+    customer_email = serializers.EmailField(
+        error_messages={
+            'invalid': 'Please provide a valid email address',
+            'required': 'Email is required'
+        }
+    )
+    customer_phone = serializers.CharField(
+        max_length=20,
+        min_length=8,
+        error_messages={
+            'min_length': 'Phone number must be at least 8 digits',
+            'required': 'Phone number is required'
+        }
+    )
 
     # Delivery Information
-    delivery_address = serializers.CharField()
-    delivery_notes = serializers.CharField(required=False, allow_blank=True)
+    delivery_address = serializers.CharField(
+        min_length=10,
+        error_messages={
+            'min_length': 'Please provide a complete address',
+            'required': 'Delivery address is required'
+        }
+    )
+    delivery_notes = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=500
+    )
 
     # Payment Information
     payment_method = serializers.ChoiceField(
@@ -80,18 +109,63 @@ class CheckoutSerializer(serializers.Serializer):
         if not items:
             raise serializers.ValidationError("Cart cannot be empty")
 
+        if len(items) > 50:
+            raise serializers.ValidationError("Maximum 50 items per order")
+
+        product_ids = [item['product_id'] for item in items]
+
+        # Check for duplicate products in cart
+        if len(product_ids) != len(set(product_ids)):
+            raise serializers.ValidationError("Duplicate products in cart")
+
+        # Validate all products exist
+        existing_products = Product.objects.filter(id__in=product_ids)
+        existing_ids = set(existing_products.values_list('id', flat=True))
+
+        missing_ids = set(product_ids) - existing_ids
+        if missing_ids:
+            raise serializers.ValidationError(
+                f"Products not found: {', '.join(map(str, missing_ids))}"
+            )
+
+        # Validate quantities are reasonable
         for item in items:
-            try:
-                product = Product.objects.get(id=item['product_id'])
-                # You can add stock validation here if needed
-                # if product.stock < item['quantity']:
-                #     raise serializers.ValidationError(f"{product.name} is out of stock")
-            except Product.DoesNotExist:
+            if item['quantity'] > 100:
                 raise serializers.ValidationError(
-                    f"Product with id {item['product_id']} does not exist"
+                    f"Maximum quantity is 100 per item"
                 )
 
         return items
+
+    def calculate_order_total(self):
+        """
+        Calculate order total from validated items.
+        Returns (subtotal, delivery_fee, discount, total)
+
+        IMPORTANT: This calculation MUST match the one in CreatePaymentIntentView
+        to avoid amount mismatch errors.
+        """
+        subtotal = Decimal('0.00')
+
+        for item_data in self.validated_data['items']:
+            product = Product.objects.get(id=item_data['product_id'])
+            quantity = item_data['quantity']
+            price = Decimal(str(product.price))
+            subtotal += price * quantity
+
+        # Business logic for fees/discounts
+        # MUST MATCH CreatePaymentIntentView calculation
+        delivery_fee = Decimal('0.00')
+        discount = Decimal('0.00')
+
+        # Currently: No delivery fee, no discount
+        # If you want to add fees/discounts, update BOTH places:
+        # 1. Here (serializers.py)
+        # 2. CreatePaymentIntentView (views.py)
+
+        total = subtotal + delivery_fee - discount
+
+        return subtotal, delivery_fee, discount, total
 
 
     def create_order(self, stripe_payment_intent_id=None):
@@ -99,10 +173,11 @@ class CheckoutSerializer(serializers.Serializer):
         Create an order with order items from validated data.
         This is called after payment is confirmed.
         """
+        from django.db import transaction
         validated_data = self.validated_data
 
         # Calculate totals
-        subtotal = Decimal('0.00')
+        subtotal, delivery_fee, discount, total = self.calculate_order_total()
         order_items_data = []
 
         for item_data in validated_data['items']:
@@ -110,8 +185,6 @@ class CheckoutSerializer(serializers.Serializer):
             quantity = item_data['quantity']
             price = Decimal(str(product.price))
             line_total = price * quantity
-
-            subtotal += line_total
 
             # Get primary image URL
             primary_image = product.images.filter(is_primary=True).first()
@@ -125,28 +198,30 @@ class CheckoutSerializer(serializers.Serializer):
                 'line_total': line_total,
             })
 
-        # Create order
-        delivery_fee = Decimal('0.00')  # You can add delivery fee logic here
-        discount = Decimal('0.00')  # You can add discount logic here
-        total = subtotal + delivery_fee - discount
+        # Create order and items atomically
+        with transaction.atomic():
+            order = Order.objects.create(
+                customer_name=validated_data['customer_name'],
+                customer_email=validated_data['customer_email'],
+                customer_phone=validated_data['customer_phone'],
+                delivery_address=validated_data['delivery_address'],
+                delivery_notes=validated_data.get('delivery_notes', ''),
+                payment_method=validated_data['payment_method'],
+                stripe_payment_intent_id=stripe_payment_intent_id,
+                subtotal=subtotal,
+                delivery_fee=delivery_fee,
+                discount=discount,
+                total=total,
+                payment_status='pending',
+                status='pending',
+            )
 
-        order = Order.objects.create(
-            customer_name=validated_data['customer_name'],
-            customer_email=validated_data['customer_email'],
-            customer_phone=validated_data['customer_phone'],
-            delivery_address=validated_data['delivery_address'],
-            delivery_notes=validated_data.get('delivery_notes', ''),
-            payment_method=validated_data['payment_method'],
-            stripe_payment_intent_id=stripe_payment_intent_id,
-            subtotal=subtotal,
-            delivery_fee=delivery_fee,
-            discount=discount,
-            total=total,
-            payment_status='pending',
-        )
-
-        # Create order items
-        for item_data in order_items_data:
-            OrderItem.objects.create(order=order, **item_data)
+            # Create order items
+            for item_data in order_items_data:
+                OrderItem.objects.create(order=order, **item_data)
 
         return order
+
+
+
+
