@@ -50,6 +50,10 @@ class Order(WithTimeStamps):
     delivery_address = models.TextField(
         help_text="Full delivery address"
     )
+    delivery_date = models.DateField(
+        help_text="Requested delivery date (must be at least 3 days in advance)",
+        null=True
+    )
     delivery_notes = models.TextField(
         blank=True,
         null=True,
@@ -112,7 +116,6 @@ class Order(WithTimeStamps):
         help_text="Final total amount"
     )
 
-    # GAP 5 FIX: Removed the duplicate paid_at field. Only one definition kept.
     paid_at = models.DateTimeField(
         blank=True,
         null=True,

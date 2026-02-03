@@ -65,6 +65,27 @@
             font-weight: 600;
         }
 
+        .delivery-date-highlight {
+            background-color: #fef3c7;
+            border-left: 4px solid #f59e0b;
+            padding: 16px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+
+        .delivery-date-highlight .date {
+            font-size: 20px;
+            font-weight: 700;
+            color: #1a1a1a;
+            margin: 8px 0;
+        }
+
+        .delivery-date-highlight .label {
+            color: #92400e;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
         .items-table {
             width: 100%;
             border-collapse: collapse;
@@ -114,6 +135,11 @@
             display: inline-block;
             margin: 10px 0;
         }
+
+        .icon {
+            display: inline-block;
+            margin-right: 8px;
+        }
     </style>
 </head>
 <body>
@@ -130,6 +156,15 @@
     <h2>您的訂單已確認</h2>
     <p>親愛的 {{ order.customer_name }}，</p>
     <p>感謝您在 HY Florist 購物。您的訂單已成功確認，我們將盡快為您處理。</p>
+
+    <!-- Delivery Date Highlight -->
+    <div class="delivery-date-highlight">
+        <div class="label">📅 預定送貨日期</div>
+        <div class="date">{{ order.delivery_date|date:"Y年n月j日 (l)" }}</div>
+        <div style="color: #92400e; font-size: 13px; margin-top: 4px;">
+            我們將於此日期送達您的鮮花
+        </div>
+    </div>
 
     <div class="order-info">
         <h2>訂單資料</h2>
@@ -168,6 +203,10 @@
         <div class="info-row">
             <span class="info-label">送貨地址：</span>
             <span class="info-value">{{ order.delivery_address }}</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">送貨日期：</span>
+            <span class="info-value">{{ order.delivery_date|date:"Y年n月j日" }}</span>
         </div>
         {% if order.delivery_notes %}
             <div class="info-row">
@@ -220,6 +259,14 @@
         </tr>
         </tfoot>
     </table>
+
+    <div style="background-color: #eff6ff; border-left: 4px solid #3b82f6; padding: 16px; margin: 20px 0; border-radius: 4px;">
+        <p style="margin: 0; color: #1e40af; font-size: 14px;">
+            <strong>📦 送貨提醒</strong><br>
+            我們將於 <strong>{{ order.delivery_date|date:"Y年n月j日" }}</strong> 送達您的訂單。<br>
+            送貨當日如有任何問題，我們會以電話 {{ order.customer_phone }} 聯絡您。
+        </p>
+    </div>
 
     <p style="color: #666; font-size: 14px; margin-top: 30px;">
         如有任何查詢，歡迎隨時聯絡我們。<br>

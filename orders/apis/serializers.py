@@ -3,6 +3,7 @@ from rest_framework import serializers
 from orders.models import OrderItem, Order
 from products.models import Product
 from decimal import Decimal
+from datetime import date, timedelta
 
 
 class OrderItemSerializer(serializers.Serializer):
@@ -38,6 +39,7 @@ class OrderSerializer(serializers.ModelSerializer):
             'customer_email',
             'customer_phone',
             'delivery_address',
+            'delivery_date',
             'delivery_notes',
             'payment_method',
             'payment_status',
@@ -89,6 +91,14 @@ class CheckoutSerializer(serializers.Serializer):
             'required': 'Delivery address is required'
         }
     )
+
+    delivery_date = serializers.DateField(
+        error_messages={
+            'invalid': 'Please provide a valid delivery date',
+            'required': 'Delivery date is required'
+        }
+    )
+
     delivery_notes = serializers.CharField(
         required=False,
         allow_blank=True,
@@ -103,6 +113,27 @@ class CheckoutSerializer(serializers.Serializer):
 
     # Cart Items
     items = OrderItemSerializer(many=True)
+
+    def validate_delivery_date(self, value):
+        """
+        Validate that delivery date is at least 3 days in advance.
+        """
+        today = date.today()
+        min_delivery_date = today + timedelta(days=2)
+
+        if value < min_delivery_date:
+            raise serializers.ValidationError(
+                f"送貨日期必須至少提前3天。最早可選日期為 {min_delivery_date.strftime('%Y-%m-%d')}"
+            )
+
+        # Optional: Add maximum advance order period (e.g., 90 days)
+        max_delivery_date = today + timedelta(days=90)
+        if value > max_delivery_date:
+            raise serializers.ValidationError(
+                "送貨日期不能超過90天後"
+            )
+
+        return value
 
     def validate_items(self, items):
         """Validate that all products exist and are available"""
@@ -206,6 +237,7 @@ class CheckoutSerializer(serializers.Serializer):
                 customer_phone=validated_data['customer_phone'],
                 delivery_address=validated_data['delivery_address'],
                 delivery_notes=validated_data.get('delivery_notes', ''),
+                delivery_date=validated_data.get('delivery_date', ''),
                 payment_method=validated_data['payment_method'],
                 stripe_payment_intent_id=stripe_payment_intent_id,
                 subtotal=subtotal,
