@@ -13,6 +13,7 @@ class Order(WithTimeStamps):
     PAYMENT_METHOD_CHOICES = [
         ('stripe', 'Stripe (Credit/Debit Card)'),
         ('apple_pay', 'Apple Pay'),
+        ('google_pay', 'Google Pay'),
         ('payme', 'PayMe'),
     ]
 
@@ -193,6 +194,16 @@ class Order(WithTimeStamps):
         self.subtotal = sum(item.line_total for item in self.items.all())
         self.total = self.subtotal + self.delivery_fee - self.discount
         return self.total
+
+    def get_payment_method_display_name(self):
+        """Return a user-friendly display name for the payment method"""
+        payment_method_names = {
+            'card_pay': '信用卡 / 扣賬卡',
+            'apple_pay': 'Apple Pay',
+            'google_pay': 'Google Pay',
+            'payme': 'PayMe',
+        }
+        return payment_method_names.get(self.payment_method, self.payment_method)
 
 
 class OrderItem(WithTimeStamps):

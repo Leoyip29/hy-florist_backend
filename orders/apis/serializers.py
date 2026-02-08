@@ -50,7 +50,7 @@ class OrderSerializer(serializers.ModelSerializer):
             'created_at',
             'items',
         ]
-        read_only_fields = ['order_number', 'created_at','paid_at']
+        read_only_fields = ['order_number', 'created_at', 'paid_at']
 
 
 class CheckoutSerializer(serializers.Serializer):
@@ -107,8 +107,8 @@ class CheckoutSerializer(serializers.Serializer):
 
     # Payment Information
     payment_method = serializers.ChoiceField(
-        choices=['stripe', 'apple_pay', 'payme'],
-        default='stripe'
+        choices=['card_pay', 'apple_pay', 'google_pay', 'payme'],
+        default='card_pay'
     )
 
     # Cart Items
@@ -198,11 +198,14 @@ class CheckoutSerializer(serializers.Serializer):
 
         return subtotal, delivery_fee, discount, total
 
-
-    def create_order(self, stripe_payment_intent_id=None):
+    def create_order(self, stripe_payment_intent_id=None, payment_method=None):
         """
         Create an order with order items from validated data.
         This is called after payment is confirmed.
+
+        Args:
+            stripe_payment_intent_id: The Stripe Payment Intent ID
+            payment_method: The actual payment method used (stripe, google_pay, apple_pay)
         """
         from django.db import transaction
         validated_data = self.validated_data
@@ -229,6 +232,9 @@ class CheckoutSerializer(serializers.Serializer):
                 'line_total': line_total,
             })
 
+        # Use the detected payment method if provided, otherwise fall back to validated data
+        final_payment_method = payment_method or validated_data['payment_method']
+
         # Create order and items atomically
         with transaction.atomic():
             order = Order.objects.create(
@@ -238,7 +244,7 @@ class CheckoutSerializer(serializers.Serializer):
                 delivery_address=validated_data['delivery_address'],
                 delivery_notes=validated_data.get('delivery_notes', ''),
                 delivery_date=validated_data.get('delivery_date', ''),
-                payment_method=validated_data['payment_method'],
+                payment_method=final_payment_method,  # Use the actual payment method
                 stripe_payment_intent_id=stripe_payment_intent_id,
                 subtotal=subtotal,
                 delivery_fee=delivery_fee,
@@ -253,7 +259,3 @@ class CheckoutSerializer(serializers.Serializer):
                 OrderItem.objects.create(order=order, **item_data)
 
         return order
-
-
-
-
