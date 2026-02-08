@@ -155,7 +155,7 @@
 
     <h2>您的訂單已確認</h2>
     <p>親愛的 {{ order.customer_name }}，</p>
-    <p>感謝您在 HY Florist 購物。您的訂單已成功確認，我們將盡快為您處理。</p>
+    <p>感謝您在 HY Florist 購物。您的訂單已成功確認,我們將盡快為您處理。</p>
 
     <!-- Delivery Date Highlight -->
     <div class="delivery-date-highlight">
@@ -264,12 +264,25 @@
         <p style="margin: 0; color: #1e40af; font-size: 14px;">
             <strong>📦 送貨提醒</strong><br>
             我們將於 <strong>{{ order.delivery_date|date:"Y年n月j日" }}</strong> 送達您的訂單。<br>
-            送貨當日如有任何問題，我們會以電話 {{ order.customer_phone }} 聯絡您。
+            送貨當日如有任何問題,我們會以電話 {{ order.customer_phone }} 聯絡您。
         </p>
     </div>
 
+    <!-- Payment Information -->
+    <div class="order-info">
+        <h2>付款資料</h2>
+        <div class="info-row">
+            <span class="info-label">付款方式：</span>
+            <span class="info-value">{{ order.get_payment_method_display_name }}</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">付款狀態：</span>
+            <span class="info-value" style="color: #10b981;">已付款</span>
+        </div>
+    </div>
+
     <p style="color: #666; font-size: 14px; margin-top: 30px;">
-        如有任何查詢，歡迎隨時聯絡我們。<br>
+        如有任何查詢,歡迎隨時聯絡我們。<br>
         電郵：{{ support_email }}<br>
         感謝您選擇 HY Florist！
     </p>
@@ -278,7 +291,7 @@
 <div class="footer">
     <p>&copy; {{ year }} {{ company_name }}. All rights reserved.</p>
     <p style="font-size: 12px; color: #999;">
-        此為系統自動發送的電郵，請勿直接回覆。
+        此為系統自動發送的電郵,請勿直接回覆。
     </p>
 </div>
 </body>
