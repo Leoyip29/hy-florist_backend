@@ -107,7 +107,7 @@ class CheckoutSerializer(serializers.Serializer):
 
     # Payment Information
     payment_method = serializers.ChoiceField(
-        choices=['card_pay', 'apple_pay', 'google_pay', 'payme'],
+        choices=['card_pay', 'apple_pay', 'google_pay', 'payme', 'alipay'],  # Added alipay
         default='card_pay'
     )
 
@@ -205,7 +205,7 @@ class CheckoutSerializer(serializers.Serializer):
 
         Args:
             stripe_payment_intent_id: The Stripe Payment Intent ID
-            payment_method: The actual payment method used (stripe, google_pay, apple_pay)
+            payment_method: The actual payment method used (stripe, google_pay, apple_pay, alipay)
         """
         from django.db import transaction
         validated_data = self.validated_data

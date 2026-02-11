@@ -33,7 +33,8 @@ class CreatePaymentIntentView(APIView):
     - Server-side amount calculation
     - Input validation via serializer
     - Proper error handling and logging
-    - Support for multiple payment methods: Card, Apple Pay, Google Pay
+    - Support for multiple payment methods: Card, Apple Pay, Google Pay, AliPay
+    - AliPay uses redirect flow while others use inline
     """
 
     def post(self, request):
@@ -75,35 +76,53 @@ class CreatePaymentIntentView(APIView):
             # Convert to cents (Stripe requires amount in smallest currency unit)
             amount_in_cents = int(total * 100)
 
-            # Create Stripe Payment Intent with automatic payment methods
-            # This automatically enables: Card, Google Pay, and Apple Pay
-            payment_intent = stripe.PaymentIntent.create(
-                amount=amount_in_cents,
-                currency='hkd',
-                # IMPORTANT: Use automatic_payment_methods OR payment_method_types, not both
-                automatic_payment_methods={
-                    'enabled': True,
-                    'allow_redirects': 'never'  # For seamless checkout experience
-                },
-                metadata={
+            # Get the requested payment method
+            requested_payment_method = request.data.get('payment_method', 'card_pay')
+
+            # Determine if this is an AliPay request
+            is_alipay = requested_payment_method == 'alipay'
+
+            # Create Payment Intent configuration
+            payment_intent_params = {
+                'amount': amount_in_cents,
+                'currency': 'usd',
+                'metadata': {
                     'customer_name': serializer.validated_data['customer_name'],
                     'customer_email': serializer.validated_data['customer_email'],
                     'customer_phone': serializer.validated_data['customer_phone'],
                     'integration': 'HY Florist',
                     'order_type': 'funeral_flowers',
                 }
-            )
+            }
+
+            # For AliPay: Use specific payment method type
+            # Note: return_url is NOT set here - it will be set during confirmation
+            if is_alipay:
+                payment_intent_params['payment_method_types'] = ['alipay']
+            else:
+                # For card/wallet payments: Use automatic payment methods (inline flow)
+                payment_intent_params['automatic_payment_methods'] = {
+                    'enabled': True,
+                    'allow_redirects': 'never'  # Only for inline payments
+                }
+
+            # Create Stripe Payment Intent
+            payment_intent = stripe.PaymentIntent.create(**payment_intent_params)
 
             logger.info(
                 f"Payment Intent created: {payment_intent.id} for amount: HK${total}, "
-                f"Available payment methods: {payment_intent.payment_method_types}"
+                f"Payment methods: {payment_intent.payment_method_types}, "
+                f"Is AliPay: {is_alipay}"
             )
 
-            return Response({
+            response_data = {
                 'clientSecret': payment_intent.client_secret,
                 'amount': float(total),
                 'paymentIntentId': payment_intent.id,
-            })
+                'requiresRedirect': is_alipay,  # Flag for frontend to handle redirect
+            }
+
+            return Response(response_data)
 
         except stripe.error.CardError as e:
             # Card-specific error
@@ -160,7 +179,7 @@ class ConfirmOrderView(APIView):
     - Amount verification
     - Atomic database transactions
     - Comprehensive error handling
-    - Support for all payment methods (Card, Apple Pay, Google Pay)
+    - Support for all payment methods (Card, Apple Pay, Google Pay, AliPay)
     - Automatic payment method detection
     """
 
@@ -194,9 +213,8 @@ class ConfirmOrderView(APIView):
                 paid_amount = Decimal(payment_intent.amount) / 100  # Convert cents to HKD
 
                 # Detect the actual payment method used
-                # Check if payment_method is expanded (object) or just an ID (string)
-                payment_method_obj = payment_intent.payment_method
                 actual_payment_method = 'card_pay'  # Default
+                payment_method_obj = payment_intent.payment_method
 
                 if isinstance(payment_method_obj, str):
                     # payment_method is just an ID, retrieve it
@@ -205,34 +223,39 @@ class ConfirmOrderView(APIView):
                     # payment_method is already expanded
                     payment_method_details = payment_method_obj
 
-                # Check the wallet type to detect Google Pay, Apple Pay, etc.
-                if hasattr(payment_method_details, 'card') and payment_method_details.card:
-                    wallet = getattr(payment_method_details.card, 'wallet', None)
-                    if wallet:
-                        wallet_type = wallet.get('type') if isinstance(wallet, dict) else getattr(wallet, 'type', None)
-                        if wallet_type == 'google_pay':
-                            actual_payment_method = 'google_pay'
-                        elif wallet_type == 'apple_pay':
-                            actual_payment_method = 'apple_pay'
-                        else:
-                            actual_payment_method = 'card_pay'
+                # Determine payment method type
+                if payment_method_details:
+                    pm_type = payment_method_details.type
+
+                    if pm_type == 'alipay':
+                        actual_payment_method = 'alipay'
+                    elif pm_type == 'card':
+                        # Check for wallet type (Google Pay, Apple Pay)
+                        if hasattr(payment_method_details, 'card') and payment_method_details.card:
+                            wallet = getattr(payment_method_details.card, 'wallet', None)
+                            if wallet:
+                                wallet_type = wallet.get('type') if isinstance(wallet, dict) else getattr(wallet, 'type', None)
+                                if wallet_type == 'google_pay':
+                                    actual_payment_method = 'google_pay'
+                                elif wallet_type == 'apple_pay':
+                                    actual_payment_method = 'apple_pay'
+                                else:
+                                    actual_payment_method = 'card_pay'
+                            else:
+                                actual_payment_method = 'card_pay'
                     else:
-                        actual_payment_method = 'card_pay'
-                else:
-                    # Fallback to payment_method_types for non-card payments
-                    payment_method_type = payment_intent.payment_method_types[
-                        0] if payment_intent.payment_method_types else 'card'
-                    payment_method_mapping = {
-                        'card': 'card_pay',
-                        'google_pay': 'google_pay',
-                        'apple_pay': 'apple_pay',
-                    }
-                    actual_payment_method = payment_method_mapping.get(payment_method_type, 'card_pay')
+                        # Other payment method types
+                        payment_method_mapping = {
+                            'card': 'card_pay',
+                            'google_pay': 'google_pay',
+                            'apple_pay': 'apple_pay',
+                            'alipay': 'alipay',
+                        }
+                        actual_payment_method = payment_method_mapping.get(pm_type, 'card_pay')
 
                 logger.info(
                     f"Payment verified - Payment Intent: {payment_intent_id}, "
                     f"Payment Method Type: {payment_method_details.type if payment_method_details else 'unknown'}, "
-                    f"Wallet Type: {wallet_type if 'wallet_type' in locals() else 'none'}, "
                     f"Final Method: {actual_payment_method}, Amount: HK${paid_amount}"
                 )
 
@@ -435,7 +458,7 @@ class StripeWebhookView(APIView):
       • CSRF exempt — authentication is the signature itself
       • Every event_id is recorded in StripeWebhookEvent before processing
       • Duplicate deliveries are detected and skipped
-      • Supports all payment methods (Card, Apple Pay, Google Pay)
+      • Supports all payment methods (Card, Apple Pay, Google Pay, AliPay)
     """
     authentication_classes = []
     permission_classes = []

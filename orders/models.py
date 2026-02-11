@@ -11,10 +11,11 @@ class Order(WithTimeStamps):
     """
 
     PAYMENT_METHOD_CHOICES = [
-        ('stripe', 'Stripe (Credit/Debit Card)'),
+        ('card_pay', 'Credit/Debit Card'),
         ('apple_pay', 'Apple Pay'),
         ('google_pay', 'Google Pay'),
         ('payme', 'PayMe'),
+        ('alipay', 'AliPay'),
     ]
 
     # Order identification
@@ -65,7 +66,7 @@ class Order(WithTimeStamps):
     payment_method = models.CharField(
         max_length=20,
         choices=PAYMENT_METHOD_CHOICES,
-        default='stripe'
+        default='card_pay'
     )
     payment_status = models.CharField(
         max_length=20,
@@ -202,6 +203,7 @@ class Order(WithTimeStamps):
             'apple_pay': 'Apple Pay',
             'google_pay': 'Google Pay',
             'payme': 'PayMe',
+            'alipay': 'AliPay',  # Added AliPay
         }
         return payment_method_names.get(self.payment_method, self.payment_method)
 
