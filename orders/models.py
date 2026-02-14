@@ -134,6 +134,27 @@ class Order(WithTimeStamps):
         help_text="When order was confirmed"
     )
 
+    # Payment currency tracking (NEW)
+    payment_currency = models.CharField(
+        max_length=3,
+        default='HKD',
+        help_text="Currency used for payment (HKD or USD)"
+    )
+    exchange_rate = models.DecimalField(
+        max_digits=10,
+        decimal_places=6,
+        null=True,
+        blank=True,
+        help_text="Exchange rate applied (HKD to USD) if payment was in USD"
+    )
+    total_usd = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Total amount in USD (for AliPay payments)"
+    )
+
     class Meta:
         ordering = ['-created_at']
         verbose_name = "Order"

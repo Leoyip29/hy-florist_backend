@@ -14,6 +14,7 @@ import stripe
 import logging
 from decimal import Decimal
 
+from currency.models import CurrencyRate
 from .serializers import CheckoutSerializer, OrderSerializer
 from ..models import Order, StripeWebhookEvent
 
@@ -27,14 +28,12 @@ logger = logging.getLogger(__name__)
 class CreatePaymentIntentView(APIView):
     """
     Create a Stripe Payment Intent for the checkout.
-    This is called before the user enters payment details.
 
-    Security features:
-    - Server-side amount calculation
-    - Input validation via serializer
-    - Proper error handling and logging
-    - Support for multiple payment methods: Card, Apple Pay, Google Pay, AliPay
-    - AliPay uses redirect flow while others use inline
+    SOLUTION FOR ALIPAY VISIBILITY:
+    - Always creates Payment Intent in USD
+    - Converts HKD to USD for ALL payment methods
+    - This allows Stripe to show AliPay in the Payment Element
+    - Tracks both HKD and USD amounts for all orders
     """
 
     def post(self, request):
@@ -48,85 +47,103 @@ class CreatePaymentIntentView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            # Calculate total amount using serializer method
-            subtotal, delivery_fee, discount, total = serializer.calculate_order_total()
+            # Calculate total amount using serializer method (in HKD)
+            subtotal, delivery_fee, discount, total_hkd = serializer.calculate_order_total()
+
+            # Get exchange rate
+            try:
+                currency_rate = CurrencyRate.objects.filter(
+                    base_currency='USD',
+                    target_currency='HKD'
+                ).order_by('-created_at').first()
+
+                if not currency_rate:
+                    logger.error("No USD to HKD exchange rate found in database")
+                    return Response(
+                        {'error': '暫時無法處理付款,請稍後再試'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+                # Convert HKD to USD (for ALL payment methods)
+                exchange_rate = currency_rate.rate
+                total_usd = (total_hkd / exchange_rate).quantize(Decimal('0.01'))
+
+            except Exception as e:
+                logger.error(f"Error during currency conversion: {str(e)}", exc_info=True)
+                return Response(
+                    {'error': '貨幣轉換失敗,請稍後再試'},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
 
             # Log calculation details
             logger.info(
-                f"Payment Intent calculation - Subtotal: HK${subtotal}, "
-                f"Delivery: HK${delivery_fee}, Discount: HK${discount}, "
-                f"Total: HK${total}, Items: {len(serializer.validated_data['items'])}"
+                f"Payment Intent - HKD: ${total_hkd}, USD: ${total_usd}, "
+                f"Rate: {exchange_rate}, Items: {len(serializer.validated_data['items'])}"
             )
 
-            # Validate total is reasonable
-            if total <= 0:
-                logger.error(f"Invalid order total: {total}")
+            # Validate amounts
+            if total_usd <= 0:
+                logger.error(f"Invalid order total: {total_usd} USD")
                 return Response(
                     {'error': '訂單金額無效'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            if total > Decimal('100000.00'):  # HK$100,000 limit
-                logger.warning(f"Order total exceeds limit: {total}")
+            if total_usd > Decimal('12820.51'):  # ~$100,000 HKD
+                logger.warning(f"Order total exceeds limit: {total_usd} USD")
                 return Response(
                     {'error': '訂單金額超過限制'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            # Convert to cents (Stripe requires amount in smallest currency unit)
-            amount_in_cents = int(total * 100)
+            # Convert to cents
+            amount_in_cents = int(total_usd * 100)
 
-            # Get the requested payment method
-            requested_payment_method = request.data.get('payment_method', 'card_pay')
-
-            # Determine if this is an AliPay request
-            is_alipay = requested_payment_method == 'alipay'
-
-            # Create Payment Intent configuration
+            # Create Payment Intent in USD (to show all payment methods including AliPay)
             payment_intent_params = {
                 'amount': amount_in_cents,
-                'currency': 'usd',
+                'currency': 'usd',  # Always USD to enable AliPay
+                'automatic_payment_methods': {
+                    'enabled': True,
+                },
                 'metadata': {
                     'customer_name': serializer.validated_data['customer_name'],
                     'customer_email': serializer.validated_data['customer_email'],
                     'customer_phone': serializer.validated_data['customer_phone'],
                     'integration': 'HY Florist',
                     'order_type': 'funeral_flowers',
+                    'total_hkd': str(total_hkd),
+                    'total_usd': str(total_usd),
+                    'exchange_rate': str(exchange_rate),
+                    'payment_currency': 'USD',
                 }
             }
-
-            # For AliPay: Use specific payment method type
-            # Note: return_url is NOT set here - it will be set during confirmation
-            if is_alipay:
-                payment_intent_params['payment_method_types'] = ['alipay']
-            else:
-                # For card/wallet payments: Use automatic payment methods (inline flow)
-                payment_intent_params['automatic_payment_methods'] = {
-                    'enabled': True,
-                    'allow_redirects': 'never'  # Only for inline payments
-                }
 
             # Create Stripe Payment Intent
             payment_intent = stripe.PaymentIntent.create(**payment_intent_params)
 
             logger.info(
-                f"Payment Intent created: {payment_intent.id} for amount: HK${total}, "
-                f"Payment methods: {payment_intent.payment_method_types}, "
-                f"Is AliPay: {is_alipay}"
+                f"Payment Intent created: {payment_intent.id}, "
+                f"Amount: ${total_usd} USD (HK${total_hkd}), "
+                f"Methods: {payment_intent.payment_method_types}"
             )
 
             response_data = {
                 'clientSecret': payment_intent.client_secret,
-                'amount': float(total),
+                'amount': float(total_hkd),  # Return HKD for display
                 'paymentIntentId': payment_intent.id,
-                'requiresRedirect': is_alipay,  # Flag for frontend to handle redirect
+                'currency': 'usd',
+                'conversionDetails': {
+                    'amountHKD': float(total_hkd),
+                    'amountUSD': float(total_usd),
+                    'exchangeRate': float(exchange_rate),
+                }
             }
 
             return Response(response_data)
 
         except stripe.error.CardError as e:
-            # Card-specific error
-            logger.warning(f"Card error during payment intent creation: {e.user_message}")
+            logger.warning(f"Card error: {e.user_message}")
             return Response(
                 {'error': '付款卡問題,請檢查卡片資料'},
                 status=status.HTTP_400_BAD_REQUEST
@@ -161,7 +178,7 @@ class CreatePaymentIntentView(APIView):
             )
 
         except Exception as e:
-            logger.critical(f"Unexpected error in CreatePaymentIntent: {str(e)}", exc_info=True)
+            logger.critical(f"Unexpected error: {str(e)}", exc_info=True)
             return Response(
                 {'error': '系統錯誤,請聯絡客服'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -173,14 +190,7 @@ class ConfirmOrderView(APIView):
     Confirm the order after successful payment.
     Creates the order record and sends confirmation email.
 
-    Security features:
-    - Payment Intent verification with Stripe
-    - Idempotency (duplicate order prevention)
-    - Amount verification
-    - Atomic database transactions
-    - Comprehensive error handling
-    - Support for all payment methods (Card, Apple Pay, Google Pay, AliPay)
-    - Automatic payment method detection
+    Now handles all payments in USD with HKD tracking.
     """
 
     def post(self, request):
@@ -194,69 +204,59 @@ class ConfirmOrderView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            # STEP 1: Verify payment with Stripe and detect payment method
+            # STEP 1: Verify payment with Stripe
             try:
                 payment_intent = stripe.PaymentIntent.retrieve(
                     payment_intent_id,
-                    expand=['payment_method']  # Expand to get full payment method details
+                    expand=['payment_method']
                 )
 
                 if payment_intent.status != 'succeeded':
                     logger.warning(
-                        f"Payment Intent {payment_intent_id} status is {payment_intent.status}, not succeeded"
+                        f"Payment Intent {payment_intent_id} status is {payment_intent.status}"
                     )
                     return Response(
                         {'error': '付款尚未完成'},
                         status=status.HTTP_400_BAD_REQUEST
                     )
 
-                paid_amount = Decimal(payment_intent.amount) / 100  # Convert cents to HKD
+                # Get payment details
+                paid_amount = Decimal(payment_intent.amount) / 100  # USD
 
-                # Detect the actual payment method used
-                actual_payment_method = 'card_pay'  # Default
+                # Extract amounts from metadata
+                total_hkd = Decimal(payment_intent.metadata.get('total_hkd', '0'))
+                total_usd = Decimal(payment_intent.metadata.get('total_usd', '0'))
+                exchange_rate = Decimal(payment_intent.metadata.get('exchange_rate', '0'))
+
+                # Detect payment method
+                actual_payment_method = 'card_pay'
                 payment_method_obj = payment_intent.payment_method
 
                 if isinstance(payment_method_obj, str):
-                    # payment_method is just an ID, retrieve it
                     payment_method_details = stripe.PaymentMethod.retrieve(payment_method_obj)
                 else:
-                    # payment_method is already expanded
                     payment_method_details = payment_method_obj
 
-                # Determine payment method type
                 if payment_method_details:
                     pm_type = payment_method_details.type
 
                     if pm_type == 'alipay':
                         actual_payment_method = 'alipay'
                     elif pm_type == 'card':
-                        # Check for wallet type (Google Pay, Apple Pay)
                         if hasattr(payment_method_details, 'card') and payment_method_details.card:
                             wallet = getattr(payment_method_details.card, 'wallet', None)
                             if wallet:
-                                wallet_type = wallet.get('type') if isinstance(wallet, dict) else getattr(wallet, 'type', None)
+                                wallet_type = wallet.get('type') if isinstance(wallet, dict) else getattr(wallet,
+                                                                                                          'type', None)
                                 if wallet_type == 'google_pay':
                                     actual_payment_method = 'google_pay'
                                 elif wallet_type == 'apple_pay':
                                     actual_payment_method = 'apple_pay'
-                                else:
-                                    actual_payment_method = 'card_pay'
-                            else:
-                                actual_payment_method = 'card_pay'
-                    else:
-                        # Other payment method types
-                        payment_method_mapping = {
-                            'card': 'card_pay',
-                            'google_pay': 'google_pay',
-                            'apple_pay': 'apple_pay',
-                            'alipay': 'alipay',
-                        }
-                        actual_payment_method = payment_method_mapping.get(pm_type, 'card_pay')
 
                 logger.info(
-                    f"Payment verified - Payment Intent: {payment_intent_id}, "
-                    f"Payment Method Type: {payment_method_details.type if payment_method_details else 'unknown'}, "
-                    f"Final Method: {actual_payment_method}, Amount: HK${paid_amount}"
+                    f"Payment verified - PI: {payment_intent_id}, "
+                    f"Method: {actual_payment_method}, "
+                    f"Amount: ${paid_amount} USD (HK${total_hkd})"
                 )
 
             except stripe.error.InvalidRequestError:
@@ -266,116 +266,86 @@ class ConfirmOrderView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             except stripe.error.StripeError as e:
-                logger.error(f"Stripe error verifying payment: {str(e)}")
+                logger.error(f"Stripe error: {str(e)}")
                 return Response(
                     {'error': '無法驗證付款狀態'},
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR
                 )
 
-            # STEP 2: Check if order already exists (idempotency)
+            # STEP 2: Check if order already exists
             existing_order = Order.objects.filter(
                 stripe_payment_intent_id=payment_intent_id
             ).first()
 
             if existing_order:
-                logger.info(
-                    f"Order {existing_order.order_number} already exists for Payment Intent {payment_intent_id}"
-                )
+                logger.info(f"Order {existing_order.order_number} already exists")
                 return Response(
                     OrderSerializer(existing_order).data,
-                    status=status.HTTP_200_OK  # Not 201, because not newly created
+                    status=status.HTTP_200_OK
                 )
 
             # STEP 3: Validate order data
             serializer = CheckoutSerializer(data=request.data)
             if not serializer.is_valid():
-                logger.warning(f"Invalid order data for PI {payment_intent_id}: {serializer.errors}")
+                logger.warning(f"Invalid order data: {serializer.errors}")
                 return Response(
                     {'error': serializer.errors},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            # Log the cart items being confirmed
-            items_summary = [
-                f"Product {item['product_id']}: qty {item['quantity']}"
-                for item in serializer.validated_data['items']
-            ]
-            logger.info(
-                f"Confirming order for PI {payment_intent_id}. Items: {', '.join(items_summary)}"
-            )
-
             # STEP 4: Verify amount matches
-            subtotal, delivery_fee, discount, expected_total = serializer.calculate_order_total()
+            subtotal, delivery_fee, discount, expected_total_hkd = serializer.calculate_order_total()
 
-            # Log both amounts for debugging
-            logger.info(
-                f"Amount verification - Payment Intent: {payment_intent_id}, "
-                f"Paid: HK${paid_amount}, Expected: HK${expected_total}, "
-                f"Subtotal: HK${subtotal}, Delivery: HK${delivery_fee}, Discount: HK${discount}"
-            )
-
-            # Allow 1 cent difference for rounding
-            if abs(paid_amount - expected_total) > Decimal('0.01'):
+            # Verify USD amount (allow 1 cent difference)
+            if abs(paid_amount - total_usd) > Decimal('0.01'):
                 logger.error(
-                    f"Amount mismatch - Paid: {paid_amount}, Expected: {expected_total}, "
-                    f"Difference: {abs(paid_amount - expected_total)}, "
-                    f"Payment Intent: {payment_intent_id}"
+                    f"Amount mismatch - Paid: ${paid_amount} USD, Expected: ${total_usd} USD"
                 )
                 return Response(
-                    {'error': f'付款金額不符 (已付: HK${paid_amount}, 應付: HK${expected_total}),請聯絡客服'},
+                    {'error': f'付款金額不符,請聯絡客服'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            # STEP 5: Create order atomically with the actual payment method
+            # STEP 5: Create order
             try:
                 with transaction.atomic():
                     order = serializer.create_order(
                         stripe_payment_intent_id=payment_intent_id,
-                        payment_method=actual_payment_method  # Pass the detected payment method
+                        payment_method=actual_payment_method,
+                        payment_currency='USD',
+                        exchange_rate=exchange_rate,
+                        total_usd=total_usd,
                     )
 
-                    # Mark as paid
                     order.mark_as_paid(payment_intent_id)
                     order.confirm_order()
 
                     logger.info(
-                        f"Order {order.order_number} created successfully. "
-                        f"Payment Intent: {payment_intent_id}, Amount: HK${order.total}, "
-                        f"Payment Method: {actual_payment_method}"
+                        f"Order {order.order_number} created - "
+                        f"HK${order.total}, US${total_usd}, Method: {actual_payment_method}"
                     )
 
             except IntegrityError as e:
-                # Race condition: Another request created the order
-                logger.warning(
-                    f"IntegrityError creating order for Payment Intent {payment_intent_id}: {str(e)}"
-                )
+                logger.warning(f"IntegrityError: {str(e)}")
                 existing_order = Order.objects.get(stripe_payment_intent_id=payment_intent_id)
                 return Response(
                     OrderSerializer(existing_order).data,
                     status=status.HTTP_200_OK
                 )
 
-            # STEP 6: Send confirmation email (outside transaction)
+            # STEP 6: Send confirmation email
             try:
                 self.send_confirmation_email(order)
             except Exception as e:
-                # Log error but don't fail the order
-                logger.error(
-                    f"Failed to send confirmation email for order {order.order_number}: {str(e)}",
-                    exc_info=True
-                )
+                logger.error(f"Failed to send email: {str(e)}", exc_info=True)
 
-            # Return order details
             return Response(
                 OrderSerializer(order).data,
                 status=status.HTTP_201_CREATED
             )
 
         except Exception as e:
-            logger.critical(
-                f"Unexpected error in ConfirmOrder: {str(e)}",
-                exc_info=True
-            )
+            logger.critical(f"Unexpected error: {str(e)}", exc_info=True)
             return Response(
                 {'error': '系統錯誤,請聯絡客服'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -384,7 +354,6 @@ class ConfirmOrderView(APIView):
     def send_confirmation_email(self, order):
         """Send order confirmation email to customer"""
         try:
-            # Prepare context for email template
             context = {
                 'order': order,
                 'items': order.items.all(),
@@ -393,14 +362,9 @@ class ConfirmOrderView(APIView):
                 'year': timezone.now().year,
             }
 
-            # Render HTML and plain text versions
-            html_message = render_to_string(
-                'emails/order_confirmation.html',
-                context
-            )
+            html_message = render_to_string('emails/order_confirmation.html', context)
             plain_message = strip_tags(html_message)
 
-            # Send email
             send_mail(
                 subject=f'訂單確認 - #{order.order_number}',
                 message=plain_message,
@@ -413,25 +377,17 @@ class ConfirmOrderView(APIView):
             logger.info(f"Confirmation email sent for order {order.order_number}")
 
         except Exception as e:
-            # Re-raise to be caught by caller
             raise Exception(f"Email sending failed: {str(e)}")
 
 
 class OrderDetailView(APIView):
-    """
-    Retrieve order details by order number.
-
-    Security: No authentication required for guest checkout,
-    but order number is difficult to guess (UUID-based).
-    """
+    """Retrieve order details by order number."""
 
     def get(self, request, order_number):
         try:
             order = Order.objects.prefetch_related('items').get(order_number=order_number)
             serializer = OrderSerializer(order)
-
             logger.info(f"Order {order_number} details retrieved")
-
             return Response(serializer.data)
 
         except Order.DoesNotExist:
@@ -441,7 +397,7 @@ class OrderDetailView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
         except Exception as e:
-            logger.error(f"Error retrieving order {order_number}: {str(e)}", exc_info=True)
+            logger.error(f"Error retrieving order: {str(e)}", exc_info=True)
             return Response(
                 {'error': '系統錯誤'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -450,16 +406,8 @@ class OrderDetailView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class StripeWebhookView(APIView):
-    """
-    Handle Stripe webhook events.
+    """Handle Stripe webhook events."""
 
-    Security:
-      • Webhook signature verified via stripe.Webhook.construct_event
-      • CSRF exempt — authentication is the signature itself
-      • Every event_id is recorded in StripeWebhookEvent before processing
-      • Duplicate deliveries are detected and skipped
-      • Supports all payment methods (Card, Apple Pay, Google Pay, AliPay)
-    """
     authentication_classes = []
     permission_classes = []
 
@@ -471,7 +419,6 @@ class StripeWebhookView(APIView):
             logger.warning("Webhook received without signature header")
             return HttpResponse('Missing signature', status=400)
 
-        # ── signature verification ────────────────────────────────────────
         try:
             event = stripe.Webhook.construct_event(
                 payload,
@@ -490,16 +437,16 @@ class StripeWebhookView(APIView):
 
         logger.info(f"Webhook received: {event_type} — {event_id}")
 
-        # ── Deduplication ──────────────────────────────────────────────
+        # Deduplication
         already_processed, _created = StripeWebhookEvent.objects.get_or_create(
             event_id=event_id,
             defaults={'event_type': event_type}
         )
         if already_processed and not _created:
-            logger.info(f"Webhook event {event_id} already processed — skipping")
+            logger.info(f"Webhook event {event_id} already processed")
             return HttpResponse(status=200)
 
-        # ── Dispatch ──────────────────────────────────────────────────────
+        # Dispatch
         if event_type == 'payment_intent.succeeded':
             self.handle_payment_success(event['data']['object'])
         elif event_type == 'payment_intent.payment_failed':
@@ -509,28 +456,17 @@ class StripeWebhookView(APIView):
 
         return HttpResponse(status=200)
 
-    # ── Handlers ──────────────────────────────────────────────────────────
-
     def handle_payment_success(self, payment_intent):
-        """Idempotent: marks order as paid if not already."""
         pi_id = payment_intent['id']
-        payment_method_types = payment_intent.get('payment_method_types', [])
-
         try:
             order = Order.objects.get(stripe_payment_intent_id=pi_id)
             if order.payment_status != 'paid':
                 order.mark_as_paid(pi_id)
-                logger.info(
-                    f"Webhook: marked {order.order_number} as paid. "
-                    f"Payment methods: {payment_method_types}"
-                )
+                logger.info(f"Webhook: marked {order.order_number} as paid")
             else:
                 logger.info(f"Webhook: {order.order_number} already paid")
         except Order.DoesNotExist:
-            logger.warning(
-                f"Webhook: no order for PI {pi_id}. "
-                "Frontend confirmation may still be pending."
-            )
+            logger.warning(f"Webhook: no order for PI {pi_id}")
 
     def handle_payment_failure(self, payment_intent):
         pi_id = payment_intent['id']

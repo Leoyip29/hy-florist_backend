@@ -29,6 +29,7 @@ class OrderItemDetailSerializer(serializers.ModelSerializer):
 class OrderSerializer(serializers.ModelSerializer):
     """Serializer for displaying order details"""
     items = OrderItemDetailSerializer(many=True, read_only=True)
+    payment_method_display = serializers.CharField(source='get_payment_method_display_name', read_only=True)
 
     class Meta:
         model = Order
@@ -42,7 +43,11 @@ class OrderSerializer(serializers.ModelSerializer):
             'delivery_date',
             'delivery_notes',
             'payment_method',
+            'payment_method_display',
             'payment_status',
+            'payment_currency',
+            'exchange_rate',
+            'total_usd',
             'subtotal',
             'delivery_fee',
             'discount',
@@ -175,6 +180,9 @@ class CheckoutSerializer(serializers.Serializer):
 
         IMPORTANT: This calculation MUST match the one in CreatePaymentIntentView
         to avoid amount mismatch errors.
+
+        NOTE: All calculations are in HKD. Currency conversion to USD (for AliPay)
+        is handled in the view, not here.
         """
         subtotal = Decimal('0.00')
 
@@ -198,19 +206,23 @@ class CheckoutSerializer(serializers.Serializer):
 
         return subtotal, delivery_fee, discount, total
 
-    def create_order(self, stripe_payment_intent_id=None, payment_method=None):
+    def create_order(self, stripe_payment_intent_id=None, payment_method=None,
+                     payment_currency='HKD', exchange_rate=None, total_usd=None):
         """
         Create an order with order items from validated data.
         This is called after payment is confirmed.
 
         Args:
             stripe_payment_intent_id: The Stripe Payment Intent ID
-            payment_method: The actual payment method used (stripe, google_pay, apple_pay, alipay)
+            payment_method: The actual payment method used (card_pay, google_pay, apple_pay, alipay)
+            payment_currency: Currency used for payment (HKD or USD)
+            exchange_rate: Exchange rate applied if payment was in USD (HKD/USD rate)
+            total_usd: Total amount in USD if payment was in USD
         """
         from django.db import transaction
         validated_data = self.validated_data
 
-        # Calculate totals
+        # Calculate totals (always in HKD)
         subtotal, delivery_fee, discount, total = self.calculate_order_total()
         order_items_data = []
 
@@ -249,9 +261,13 @@ class CheckoutSerializer(serializers.Serializer):
                 subtotal=subtotal,
                 delivery_fee=delivery_fee,
                 discount=discount,
-                total=total,
+                total=total,  # HKD total
                 payment_status='pending',
                 status='pending',
+                # Currency tracking fields
+                payment_currency=payment_currency,
+                exchange_rate=exchange_rate,
+                total_usd=total_usd,
             )
 
             # Create order items

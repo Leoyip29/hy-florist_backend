@@ -56,9 +56,11 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     'corsheaders',
     'django_filters',
+    'huey.contrib.djhuey',
 
     'products',
     'orders',
+    'currency',
 ]
 
 MIDDLEWARE = [
@@ -260,3 +262,23 @@ LOGGING = {
 # Create logs directory if it doesn't exist
 LOGS_DIR = BASE_DIR / 'logs'
 LOGS_DIR.mkdir(exist_ok=True)
+
+HUEY = {
+    'huey_class': 'huey.RedisHuey',
+    'name': 'hy-florist',
+    'results': True,
+    'immediate': False,  # Set True for testing
+    'utc': False,  # Use Hong Kong timezone
+    'connection': {
+        'host': 'localhost',
+        'port': 6379,
+        'db': 0,
+    },
+    'consumer': {
+        'workers': 2,
+        'worker_type': 'thread',
+        'periodic': True,  # Enable cron tasks
+    },
+}
+
+EXCHANGERATE_API_KEY = env('EXCHANGERATE_API_KEY', default='http://localhost:3000')
