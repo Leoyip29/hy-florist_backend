@@ -75,6 +75,9 @@ class OrderAdmin(admin.ModelAdmin):
                 'payment_status',
                 'stripe_payment_intent_id',
                 'paid_at',
+                'payment_currency',
+                'exchange_rate',
+                'total_usd'
             )
         }),
         ('Order Totals', {
