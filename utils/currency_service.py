@@ -39,7 +39,7 @@ def fetch_exchange_rate_from_api():
         data = response.json()
 
         if data.get('result') == 'success':
-            hkd_rate = Decimal(str(data['rates']['HKD']))
+            hkd_rate = Decimal(str(data['conversion_rates']['HKD']))
 
             # Validate rate is reasonable (HKD typically 7.75 - 7.85)
             if Decimal('7.50') <= hkd_rate <= Decimal('8.50'):
