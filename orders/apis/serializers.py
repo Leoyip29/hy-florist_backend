@@ -112,7 +112,7 @@ class CheckoutSerializer(serializers.Serializer):
 
     # Payment Information
     payment_method = serializers.ChoiceField(
-        choices=['card_pay', 'apple_pay', 'google_pay', 'payme', 'alipay'],  # Added alipay
+        choices=['card_pay', 'apple_pay', 'google_pay', 'payme', 'alipay','wechat_pay'],  # Added alipay
         default='card_pay'
     )
 

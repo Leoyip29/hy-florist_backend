@@ -16,6 +16,7 @@ class Order(WithTimeStamps):
         ('google_pay', 'Google Pay'),
         ('payme', 'PayMe'),
         ('alipay', 'AliPay'),
+        ('wechat_pay', 'WeChat Pay'),
     ]
 
     # Order identification
@@ -134,7 +135,7 @@ class Order(WithTimeStamps):
         help_text="When order was confirmed"
     )
 
-    # Payment currency tracking (NEW)
+    # Payment currency tracking
     payment_currency = models.CharField(
         max_length=3,
         default='HKD',
@@ -152,7 +153,7 @@ class Order(WithTimeStamps):
         decimal_places=2,
         null=True,
         blank=True,
-        help_text="Total amount in USD (for AliPay payments)"
+        help_text="Total amount in USD (for AliPay / WeChat Pay payments)"
     )
 
     class Meta:
@@ -220,11 +221,12 @@ class Order(WithTimeStamps):
     def get_payment_method_display_name(self):
         """Return a user-friendly display name for the payment method"""
         payment_method_names = {
-            'card_pay': '信用卡 / 扣賬卡',
+            'card_pay': 'Credit/Debit Card',
             'apple_pay': 'Apple Pay',
             'google_pay': 'Google Pay',
             'payme': 'PayMe',
-            'alipay': 'AliPay',  # Added AliPay
+            'alipay': 'AliPay',
+            'wechat_pay': 'WeChat Pay',
         }
         return payment_method_names.get(self.payment_method, self.payment_method)
 
