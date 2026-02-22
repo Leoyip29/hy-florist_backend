@@ -1,4 +1,6 @@
 from django.urls import path
+
+from orders.apis.payme_views import CreatePayMeOrderView, ConfirmPayMePaymentView, PayMeOrderStatusView
 from orders.apis.views import (
     CreatePaymentIntentView,
     ConfirmOrderView,
@@ -34,4 +36,8 @@ urlpatterns = [
         StripeWebhookView.as_view(),
         name='stripe-webhook'
     ),
+
+    path("orders/payme/create/",  CreatePayMeOrderView.as_view(),    name="payme_create_order"),
+    path("orders/payme/confirm/", ConfirmPayMePaymentView.as_view(), name="payme_confirm_payment"),
+    path("orders/payme/status/<str:order_number>/", PayMeOrderStatusView.as_view(), name="payme_order_status"),
 ]
