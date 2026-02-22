@@ -23,6 +23,7 @@ from django.utils.html import strip_tags
 from django.conf import settings
 import logging
 
+from utils.email import send_order_confirmation_email
 from .models import Order, OrderItem
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 @admin.action(description="✅ Confirm PayMe Payment (mark as paid + send email)")
 def confirm_payme_payment(modeladmin, request, queryset):
+    logger.info(f"Action triggered — queryset count: {queryset.count()}")
     """
     Bulk action: mark selected PayMe orders as paid and send confirmation emails.
     Only processes orders that are:
@@ -44,6 +46,8 @@ def confirm_payme_payment(modeladmin, request, queryset):
     skipped = 0
 
     for order in queryset:
+        logger.info(
+            f"Processing order: {order.order_number}, method: {order.payment_method}, status: {order.payment_status}")
         if order.payment_method != 'payme':
             modeladmin.message_user(
                 request,
@@ -67,31 +71,14 @@ def confirm_payme_payment(modeladmin, request, queryset):
         order.confirm_order()
         logger.info(f"Admin confirmed PayMe payment for order {order.order_number}")
 
-        # Send confirmation email
         try:
-            context = {
-                'order': order,
-                'items': order.items.all(),
-                'company_name': 'HY Florist',
-                'support_email': settings.DEFAULT_FROM_EMAIL,
-                'year': timezone.now().year,
-            }
-            html_message = render_to_string('emails/order_confirmation.html', context)
-            plain_message = strip_tags(html_message)
-            send_mail(
-                subject=f'訂單確認 - #{order.order_number}',
-                message=plain_message,
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[order.customer_email],
-                html_message=html_message,
-                fail_silently=False,
-            )
+            send_order_confirmation_email(order)
             logger.info(f"Confirmation email sent for {order.order_number}")
         except Exception as e:
             logger.error(f"Email failed for {order.order_number}: {str(e)}", exc_info=True)
             modeladmin.message_user(
                 request,
-                f"⚠️ Order #{order.order_number} confirmed, but confirmation email failed: {str(e)}",
+                f"⚠️ Order #{order.order_number} confirmed, but email failed: {str(e)}",
                 level='warning'
             )
 
@@ -154,7 +141,7 @@ class OrderAdmin(admin.ModelAdmin):
 
     fieldsets = (
         ('Order', {
-            'fields': ('order_number', 'status', 'created_at', 'updated_at')
+            'fields': ('order_number', 'status','language', 'created_at', 'updated_at')
         }),
         ('Customer', {
             'fields': ('customer_name', 'customer_email', 'customer_phone')

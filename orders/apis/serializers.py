@@ -52,6 +52,7 @@ class OrderSerializer(serializers.ModelSerializer):
             'delivery_fee',
             'discount',
             'total',
+            'language',
             'created_at',
             'items',
         ]
@@ -112,17 +113,21 @@ class CheckoutSerializer(serializers.Serializer):
 
     # Payment Information
     payment_method = serializers.ChoiceField(
-        choices=['card_pay', 'apple_pay', 'google_pay', 'payme', 'alipay','wechat_pay'],  # Added alipay
+        choices=['card_pay', 'apple_pay', 'google_pay', 'payme', 'alipay', 'wechat_pay'],
         default='card_pay'
+    )
+
+    # ── Language preference ───────────────────────────────────────────────────
+    language = serializers.ChoiceField(
+        choices=['zh-HK', 'en'],
+        default='zh-HK',
+        required=False,
     )
 
     # Cart Items
     items = OrderItemSerializer(many=True)
 
     def validate_delivery_date(self, value):
-        """
-        Validate that delivery date is at least 3 days in advance.
-        """
         today = date.today()
         min_delivery_date = today + timedelta(days=2)
 
@@ -131,17 +136,13 @@ class CheckoutSerializer(serializers.Serializer):
                 f"送貨日期必須至少提前3天。最早可選日期為 {min_delivery_date.strftime('%Y-%m-%d')}"
             )
 
-        # Optional: Add maximum advance order period (e.g., 90 days)
         max_delivery_date = today + timedelta(days=90)
         if value > max_delivery_date:
-            raise serializers.ValidationError(
-                "送貨日期不能超過90天後"
-            )
+            raise serializers.ValidationError("送貨日期不能超過90天後")
 
         return value
 
     def validate_items(self, items):
-        """Validate that all products exist and are available"""
         if not items:
             raise serializers.ValidationError("Cart cannot be empty")
 
@@ -150,11 +151,9 @@ class CheckoutSerializer(serializers.Serializer):
 
         product_ids = [item['product_id'] for item in items]
 
-        # Check for duplicate products in cart
         if len(product_ids) != len(set(product_ids)):
             raise serializers.ValidationError("Duplicate products in cart")
 
-        # Validate all products exist
         existing_products = Product.objects.filter(id__in=product_ids)
         existing_ids = set(existing_products.values_list('id', flat=True))
 
@@ -164,26 +163,13 @@ class CheckoutSerializer(serializers.Serializer):
                 f"Products not found: {', '.join(map(str, missing_ids))}"
             )
 
-        # Validate quantities are reasonable
         for item in items:
             if item['quantity'] > 100:
-                raise serializers.ValidationError(
-                    f"Maximum quantity is 100 per item"
-                )
+                raise serializers.ValidationError("Maximum quantity is 100 per item")
 
         return items
 
     def calculate_order_total(self):
-        """
-        Calculate order total from validated items.
-        Returns (subtotal, delivery_fee, discount, total)
-
-        IMPORTANT: This calculation MUST match the one in CreatePaymentIntentView
-        to avoid amount mismatch errors.
-
-        NOTE: All calculations are in HKD. Currency conversion to USD (for AliPay)
-        is handled in the view, not here.
-        """
         subtotal = Decimal('0.00')
 
         for item_data in self.validated_data['items']:
@@ -192,37 +178,17 @@ class CheckoutSerializer(serializers.Serializer):
             price = Decimal(str(product.price))
             subtotal += price * quantity
 
-        # Business logic for fees/discounts
-        # MUST MATCH CreatePaymentIntentView calculation
         delivery_fee = Decimal('0.00')
         discount = Decimal('0.00')
-
-        # Currently: No delivery fee, no discount
-        # If you want to add fees/discounts, update BOTH places:
-        # 1. Here (serializers.py)
-        # 2. CreatePaymentIntentView (views.py)
-
         total = subtotal + delivery_fee - discount
 
         return subtotal, delivery_fee, discount, total
 
     def create_order(self, stripe_payment_intent_id=None, payment_method=None,
                      payment_currency='HKD', exchange_rate=None, total_usd=None):
-        """
-        Create an order with order items from validated data.
-        This is called after payment is confirmed.
-
-        Args:
-            stripe_payment_intent_id: The Stripe Payment Intent ID
-            payment_method: The actual payment method used (card_pay, google_pay, apple_pay, alipay)
-            payment_currency: Currency used for payment (HKD or USD)
-            exchange_rate: Exchange rate applied if payment was in USD (HKD/USD rate)
-            total_usd: Total amount in USD if payment was in USD
-        """
         from django.db import transaction
         validated_data = self.validated_data
 
-        # Calculate totals (always in HKD)
         subtotal, delivery_fee, discount, total = self.calculate_order_total()
         order_items_data = []
 
@@ -232,7 +198,6 @@ class CheckoutSerializer(serializers.Serializer):
             price = Decimal(str(product.price))
             line_total = price * quantity
 
-            # Get primary image URL
             primary_image = product.images.filter(is_primary=True).first()
             image_url = primary_image.url if primary_image else None
 
@@ -244,10 +209,8 @@ class CheckoutSerializer(serializers.Serializer):
                 'line_total': line_total,
             })
 
-        # Use the detected payment method if provided, otherwise fall back to validated data
         final_payment_method = payment_method or validated_data['payment_method']
 
-        # Create order and items atomically
         with transaction.atomic():
             order = Order.objects.create(
                 customer_name=validated_data['customer_name'],
@@ -256,21 +219,20 @@ class CheckoutSerializer(serializers.Serializer):
                 delivery_address=validated_data['delivery_address'],
                 delivery_notes=validated_data.get('delivery_notes', ''),
                 delivery_date=validated_data.get('delivery_date', ''),
-                payment_method=final_payment_method,  # Use the actual payment method
+                payment_method=final_payment_method,
                 stripe_payment_intent_id=stripe_payment_intent_id,
                 subtotal=subtotal,
                 delivery_fee=delivery_fee,
                 discount=discount,
-                total=total,  # HKD total
+                total=total,
                 payment_status='pending',
                 status='pending',
-                # Currency tracking fields
                 payment_currency=payment_currency,
                 exchange_rate=exchange_rate,
                 total_usd=total_usd,
+                language=validated_data.get('language', 'zh-HK'),  # ← new
             )
 
-            # Create order items
             for item_data in order_items_data:
                 OrderItem.objects.create(order=order, **item_data)
 

@@ -19,6 +19,11 @@ class Order(WithTimeStamps):
         ('wechat_pay', 'WeChat Pay'),
     ]
 
+    LANGUAGE_CHOICES = [
+        ('zh-HK', 'Traditional Chinese'),
+        ('en', 'English'),
+    ]
+
     # Order identification
     order_number = models.CharField(
         max_length=50,
@@ -154,6 +159,12 @@ class Order(WithTimeStamps):
         null=True,
         blank=True,
         help_text="Total amount in USD (for AliPay / WeChat Pay payments)"
+    )
+
+    language = models.CharField(
+        max_length=10,
+        choices=LANGUAGE_CHOICES,
+        default='zh-HK',
     )
 
     class Meta:

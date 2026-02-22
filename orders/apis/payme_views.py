@@ -24,6 +24,7 @@ import urllib.parse
 import logging
 from decimal import Decimal
 
+from utils.email import send_order_confirmation_email
 from .serializers import CheckoutSerializer, OrderSerializer
 from ..models import Order
 
@@ -249,7 +250,7 @@ class ConfirmPayMePaymentView(APIView):
 
         # Send confirmation email
         try:
-            self._send_confirmation_email(order)
+            send_order_confirmation_email(order)
         except Exception as e:
             logger.error(f"Email failed for {order_number}: {str(e)}", exc_info=True)
 
@@ -260,26 +261,6 @@ class ConfirmPayMePaymentView(APIView):
             },
             status=status.HTTP_200_OK
         )
-
-    def _send_confirmation_email(self, order):
-        context = {
-            'order': order,
-            'items': order.items.all(),
-            'company_name': 'HY Florist',
-            'support_email': settings.DEFAULT_FROM_EMAIL,
-            'year': timezone.now().year,
-        }
-        html_message = render_to_string('emails/order_confirmation.html', context)
-        plain_message = strip_tags(html_message)
-        send_mail(
-            subject=f'訂單確認 - #{order.order_number}',
-            message=plain_message,
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[order.customer_email],
-            html_message=html_message,
-            fail_silently=False,
-        )
-        logger.info(f"Confirmation email sent for PayMe order {order.order_number}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
