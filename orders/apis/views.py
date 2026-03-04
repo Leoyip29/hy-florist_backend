@@ -15,6 +15,7 @@ import logging
 from decimal import Decimal
 
 from currency.models import CurrencyRate
+from utils.email import send_order_confirmation_email
 from .serializers import CheckoutSerializer, OrderSerializer
 from ..models import Order, StripeWebhookEvent
 
@@ -361,7 +362,7 @@ class ConfirmOrderView(APIView):
 
             # STEP 6: Send confirmation email (non-blocking on failure)
             try:
-                self.send_confirmation_email(order)
+                send_order_confirmation_email(order)
             except Exception as e:
                 logger.error(f"Failed to send email: {str(e)}", exc_info=True)
 
@@ -376,34 +377,6 @@ class ConfirmOrderView(APIView):
                 {'error': '系統錯誤,請聯絡客服'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-
-    def send_confirmation_email(self, order):
-        """Send order confirmation email to customer"""
-        try:
-            context = {
-                'order': order,
-                'items': order.items.all(),
-                'company_name': 'HY Florist',
-                'support_email': settings.DEFAULT_FROM_EMAIL,
-                'year': timezone.now().year,
-            }
-
-            html_message = render_to_string('emails/order_confirmation.html', context)
-            plain_message = strip_tags(html_message)
-
-            send_mail(
-                subject=f'訂單確認 - #{order.order_number}',
-                message=plain_message,
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[order.customer_email],
-                html_message=html_message,
-                fail_silently=False,
-            )
-
-            logger.info(f"Confirmation email sent for order {order.order_number}")
-
-        except Exception as e:
-            raise Exception(f"Email sending failed: {str(e)}")
 
 
 class OrderDetailView(APIView):
