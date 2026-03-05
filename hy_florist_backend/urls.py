@@ -19,10 +19,13 @@ from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 
+from currency.apis.views import LatestExchangeRateView
+
 urlpatterns = [
     path('admin/', admin.site.urls),
     path("api/", include("products.urls")),
     path("api/", include("orders.urls")),
+    path('api/currency/latest-rate/', LatestExchangeRateView.as_view(), name='latest-exchange-rate'),
 ]
 
 # Serve media files in development

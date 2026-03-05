@@ -2,9 +2,6 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.conf import settings
-from django.core.mail import send_mail
-from django.template.loader import render_to_string
-from django.utils.html import strip_tags
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from django.http import HttpResponse
@@ -19,29 +16,45 @@ from utils.email import send_order_confirmation_email
 from .serializers import CheckoutSerializer, OrderSerializer
 from ..models import Order, StripeWebhookEvent
 
-# Initialize Stripe
 stripe.api_key = settings.STRIPE_SECRET_KEY
-
-# Configure logging
 logger = logging.getLogger(__name__)
 
 
 class CreatePaymentIntentView(APIView):
     """
-    Create a Stripe Payment Intent for the checkout.
+    Create a SINGLE Stripe Payment Intent based on selected payment method.
 
-    SOLUTION FOR ALIPAY / WECHAT PAY VISIBILITY:
-    - Always creates Payment Intent in USD
-    - Converts HKD to USD for ALL payment methods
-    - This allows Stripe to show AliPay and WeChat Pay in the Payment Element
-    - Both AliPay and WeChat Pay are redirect-based: user leaves the site and
-      returns via the return_url after completing payment externally.
-    - Tracks both HKD and USD amounts for all orders
+    OPTIMIZED APPROACH - No wasted Payment Intents:
+    - User selects payment method FIRST on frontend
+    - Backend creates ONLY ONE Payment Intent in appropriate currency
+    - Cards/Wallets → HKD Payment Intent
+    - AliPay/WeChat Pay → USD Payment Intent
+
+    Request must include:
+    - selected_payment_method: 'card' | 'alipay' | 'wechat_pay'
     """
+
+    PAYMENT_METHOD_CURRENCY_MAP = {
+        'card': 'hkd',  # Cards, Apple Pay, Google Pay
+        'apple_pay': 'hkd',
+        'google_pay': 'hkd',
+        'alipay': 'usd',  # AliPay & WeChat Pay → USD (Stripe requirement)
+        'wechat_pay': 'usd',  # WeChat Pay (same as AliPay, both use USD)
+    }
 
     def post(self, request):
         try:
-            # Validate checkout data first
+            # Get selected payment method from request
+            selected_method = request.data.get('selected_payment_method', 'card')
+
+            if selected_method not in self.PAYMENT_METHOD_CURRENCY_MAP:
+                logger.warning(f"Invalid payment method: {selected_method}")
+                return Response(
+                    {'error': '無效的付款方式'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Validate checkout data
             serializer = CheckoutSerializer(data=request.data)
             if not serializer.is_valid():
                 logger.warning(f"Invalid checkout data: {serializer.errors}")
@@ -50,132 +63,130 @@ class CreatePaymentIntentView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            # Calculate total amount using serializer method (in HKD)
+            # Calculate total in HKD (our base currency)
             subtotal, delivery_fee, discount, total_hkd = serializer.calculate_order_total()
 
-            # Get exchange rate
-            try:
+            # Validate HKD amount
+            if total_hkd <= 0:
+                logger.error(f"Invalid order total: {total_hkd} HKD")
+                return Response(
+                    {'error': '訂單金額無效'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            if total_hkd > Decimal('100000.00'):
+                logger.warning(f"Order total exceeds limit: {total_hkd} HKD")
+                return Response(
+                    {'error': '訂單金額超過限制'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Determine currency based on payment method
+            payment_currency = self.PAYMENT_METHOD_CURRENCY_MAP[selected_method]
+
+            # Prepare shared metadata
+            metadata = {
+                'customer_name': serializer.validated_data['customer_name'],
+                'customer_email': serializer.validated_data['customer_email'],
+                'customer_phone': serializer.validated_data['customer_phone'],
+                'integration': 'HY Florist',
+                'order_type': 'funeral_flowers',
+                'total_hkd': str(total_hkd),
+                'payment_currency': payment_currency.upper(),
+                'selected_payment_method': selected_method,
+                'language': serializer.validated_data.get('language', 'zh-HK'),
+            }
+
+            # Create Payment Intent in appropriate currency
+            if payment_currency == 'hkd':
+                # ============================================================
+                # HKD PAYMENT INTENT (Cards, Apple Pay, Google Pay)
+                # ============================================================
+                amount = int(total_hkd * 100)
+                currency = 'hkd'
+
+                payment_intent = stripe.PaymentIntent.create(
+                    amount=amount,
+                    currency=currency,
+                    payment_method_types=['card'],  # Supports cards, Apple Pay, Google Pay
+                    metadata=metadata
+                )
+
+                logger.info(
+                    f"HKD Payment Intent created: {payment_intent.id}, "
+                    f"Amount: HK${total_hkd}, Method: {selected_method}"
+                )
+
+                response_data = {
+                    'clientSecret': payment_intent.client_secret,
+                    'paymentIntentId': payment_intent.id,
+                    'currency': 'hkd',
+                    'amount': float(total_hkd),
+                    'displayAmount': f'HK${total_hkd:.2f}',
+                    'conversionDetails': {
+                        'amountHKD': float(total_hkd),
+                        'amountUSD': None,
+                        'exchangeRate': None,
+                    }
+                }
+
+            else:  # USD for AliPay / WeChat Pay
+                # ============================================================
+                # USD PAYMENT INTENT (AliPay & WeChat Pay)
+                # Both payment methods use USD and are enabled together
+                # ============================================================
+                # Get exchange rate
                 currency_rate = CurrencyRate.objects.filter(
                     base_currency='USD',
                     target_currency='HKD'
                 ).order_by('-created_at').first()
 
                 if not currency_rate:
-                    logger.error("No USD to HKD exchange rate found in database")
+                    logger.error("No USD to HKD exchange rate found")
                     return Response(
                         {'error': '暫時無法處理付款,請稍後再試'},
                         status=status.HTTP_400_BAD_REQUEST
                     )
 
-                # Convert HKD to USD (for ALL payment methods)
-                # This is required for AliPay and WeChat Pay which need USD
                 exchange_rate = currency_rate.rate
                 total_usd = (total_hkd / exchange_rate).quantize(Decimal('0.01'))
 
-            except Exception as e:
-                logger.error(f"Error during currency conversion: {str(e)}", exc_info=True)
-                return Response(
-                    {'error': '貨幣轉換失敗,請稍後再試'},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                amount = int(total_usd * 100)
+                currency = 'usd'
+
+                # Add USD-specific metadata
+                metadata['total_usd'] = str(total_usd)
+                metadata['exchange_rate'] = str(exchange_rate)
+
+                # Enable BOTH AliPay and WeChat Pay in the Payment Element
+                # User can choose either one when they see Stripe's payment form
+                payment_intent = stripe.PaymentIntent.create(
+                    amount=amount,
+                    currency=currency,
+                    payment_method_types=['alipay', 'wechat_pay'],  # Both enabled
+                    metadata=metadata
                 )
 
-            # Log calculation details
-            logger.info(
-                f"Payment Intent - HKD: ${total_hkd}, USD: ${total_usd}, "
-                f"Rate: {exchange_rate}, Items: {len(serializer.validated_data['items'])}"
-            )
-
-            # Validate amounts
-            if total_usd <= 0:
-                logger.error(f"Invalid order total: {total_usd} USD")
-                return Response(
-                    {'error': '訂單金額無效'},
-                    status=status.HTTP_400_BAD_REQUEST
+                logger.info(
+                    f"USD Payment Intent created: {payment_intent.id}, "
+                    f"Amount: US${total_usd} (HK${total_hkd}), "
+                    f"Rate: {exchange_rate}, Selected: {selected_method}"
                 )
 
-            if total_usd > Decimal('12820.51'):  # ~$100,000 HKD
-                logger.warning(f"Order total exceeds limit: {total_usd} USD")
-                return Response(
-                    {'error': '訂單金額超過限制'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-            # Convert to cents
-            amount_in_cents = int(total_usd * 100)
-
-            # Create Payment Intent in USD
-            # USD enables AliPay and WeChat Pay in Stripe's Payment Element.
-            # Both are redirect-based payment methods: Stripe will redirect the
-            # user to the external app/page, then back to our return_url.
-            payment_intent_params = {
-                'amount': amount_in_cents,
-                'currency': 'usd',  # USD enables AliPay + WeChat Pay
-                'automatic_payment_methods': {
-                    'enabled': True,
-                },
-                'metadata': {
-                    'customer_name': serializer.validated_data['customer_name'],
-                    'customer_email': serializer.validated_data['customer_email'],
-                    'customer_phone': serializer.validated_data['customer_phone'],
-                    'integration': 'HY Florist',
-                    'order_type': 'funeral_flowers',
-                    'total_hkd': str(total_hkd),
-                    'total_usd': str(total_usd),
-                    'exchange_rate': str(exchange_rate),
-                    'payment_currency': 'USD',
+                response_data = {
+                    'clientSecret': payment_intent.client_secret,
+                    'paymentIntentId': payment_intent.id,
+                    'currency': 'usd',
+                    'amount': float(total_usd),
+                    'displayAmount': f'US${total_usd:.2f}',
+                    'conversionDetails': {
+                        'amountHKD': float(total_hkd),
+                        'amountUSD': float(total_usd),
+                        'exchangeRate': float(exchange_rate),
+                    }
                 }
-            }
-
-            # Create Stripe Payment Intent
-            payment_intent = stripe.PaymentIntent.create(**payment_intent_params)
-
-            logger.info(
-                f"Payment Intent created: {payment_intent.id}, "
-                f"Amount: ${total_usd} USD (HK${total_hkd}), "
-                f"Methods: {payment_intent.payment_method_types}"
-            )
-
-            response_data = {
-                'clientSecret': payment_intent.client_secret,
-                'amount': float(total_hkd),  # Return HKD for display
-                'paymentIntentId': payment_intent.id,
-                'currency': 'usd',
-                'conversionDetails': {
-                    'amountHKD': float(total_hkd),
-                    'amountUSD': float(total_usd),
-                    'exchangeRate': float(exchange_rate),
-                }
-            }
 
             return Response(response_data)
-
-        except stripe.error.CardError as e:
-            logger.warning(f"Card error: {e.user_message}")
-            return Response(
-                {'error': '付款卡問題,請檢查卡片資料'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        except stripe.error.RateLimitError as e:
-            logger.error(f"Stripe rate limit error: {str(e)}")
-            return Response(
-                {'error': '請求過於頻繁,請稍後再試'},
-                status=status.HTTP_429_TOO_MANY_REQUESTS
-            )
-
-        except stripe.error.InvalidRequestError as e:
-            logger.error(f"Invalid Stripe request: {str(e)}", exc_info=True)
-            return Response(
-                {'error': '系統錯誤,請稍後再試'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
-        except stripe.error.AuthenticationError as e:
-            logger.critical(f"Stripe authentication error: {str(e)}", exc_info=True)
-            return Response(
-                {'error': '系統配置錯誤,請聯絡客服'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
 
         except stripe.error.StripeError as e:
             logger.error(f"Stripe error: {str(e)}", exc_info=True)
@@ -194,15 +205,8 @@ class CreatePaymentIntentView(APIView):
 
 class ConfirmOrderView(APIView):
     """
-    Confirm the order after successful payment.
-    Creates the order record and sends confirmation email.
-
-    Handles all payments in USD with HKD tracking.
-
-    Redirect-based payment methods (AliPay, WeChat Pay):
-    - User is taken to the external payment page by Stripe
-    - After completion, Stripe redirects back to our return_url
-    - The return page calls this endpoint to confirm the order
+    Confirm order after successful payment.
+    Handles both HKD and USD Payment Intents seamlessly.
     """
 
     def post(self, request):
@@ -232,58 +236,29 @@ class ConfirmOrderView(APIView):
                         status=status.HTTP_400_BAD_REQUEST
                     )
 
-                # Get payment details
-                paid_amount = Decimal(payment_intent.amount) / 100  # USD
+                # Extract currency and amounts from Payment Intent
+                payment_currency = payment_intent.currency.upper()
+                paid_amount = Decimal(payment_intent.amount) / 100
 
-                # Extract amounts from metadata
+                # Get HKD total from metadata
                 total_hkd = Decimal(payment_intent.metadata.get('total_hkd', '0'))
-                total_usd = Decimal(payment_intent.metadata.get('total_usd', '0'))
-                exchange_rate = Decimal(payment_intent.metadata.get('exchange_rate', '0'))
 
-                # -------------------------------------------------------
-                # Detect payment method
-                # AliPay  → pm_type == 'alipay'
-                # WeChat  → pm_type == 'wechat_pay'
-                # Cards   → pm_type == 'card', then check wallet sub-type
-                # -------------------------------------------------------
-                actual_payment_method = 'card_pay'
-                payment_method_obj = payment_intent.payment_method
-
-                if isinstance(payment_method_obj, str):
-                    payment_method_details = stripe.PaymentMethod.retrieve(payment_method_obj)
+                # Get USD details if payment was in USD
+                if payment_currency == 'USD':
+                    total_usd = Decimal(payment_intent.metadata.get('total_usd', '0'))
+                    exchange_rate = Decimal(payment_intent.metadata.get('exchange_rate', '0'))
                 else:
-                    payment_method_details = payment_method_obj
+                    total_usd = None
+                    exchange_rate = None
 
-                if payment_method_details:
-                    pm_type = payment_method_details.type
-
-                    if pm_type == 'alipay':
-                        actual_payment_method = 'alipay'
-
-                    elif pm_type == 'wechat_pay':
-                        # WeChat Pay is a redirect-based method, same as AliPay.
-                        # User is redirected to WeChat (app or web QR), completes
-                        # payment there, then redirected back to our return_url.
-                        actual_payment_method = 'wechat_pay'
-
-                    elif pm_type == 'card':
-                        if hasattr(payment_method_details, 'card') and payment_method_details.card:
-                            wallet = getattr(payment_method_details.card, 'wallet', None)
-                            if wallet:
-                                wallet_type = (
-                                    wallet.get('type')
-                                    if isinstance(wallet, dict)
-                                    else getattr(wallet, 'type', None)
-                                )
-                                if wallet_type == 'google_pay':
-                                    actual_payment_method = 'google_pay'
-                                elif wallet_type == 'apple_pay':
-                                    actual_payment_method = 'apple_pay'
+                # Detect actual payment method used
+                actual_payment_method = self._detect_payment_method(payment_intent)
 
                 logger.info(
                     f"Payment verified - PI: {payment_intent_id}, "
                     f"Method: {actual_payment_method}, "
-                    f"Amount: ${paid_amount} USD (HK${total_hkd})"
+                    f"Currency: {payment_currency}, "
+                    f"Amount: {payment_currency}${paid_amount}"
                 )
 
             except stripe.error.InvalidRequestError:
@@ -320,15 +295,16 @@ class ConfirmOrderView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            # STEP 4: Verify amount matches (allow 1 cent difference for rounding)
-            subtotal, delivery_fee, discount, expected_total_hkd = serializer.calculate_order_total()
+            # STEP 4: Verify amount matches
+            expected_subtotal, expected_delivery, expected_discount, expected_total_hkd = \
+                serializer.calculate_order_total()
 
-            if abs(paid_amount - total_usd) > Decimal('0.01'):
+            if abs(total_hkd - expected_total_hkd) > Decimal('0.01'):
                 logger.error(
-                    f"Amount mismatch - Paid: ${paid_amount} USD, Expected: ${total_usd} USD"
+                    f"Amount mismatch - PI HKD: ${total_hkd}, Expected: ${expected_total_hkd}"
                 )
                 return Response(
-                    {'error': f'付款金額不符,請聯絡客服'},
+                    {'error': '付款金額不符,請聯絡客服'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
@@ -338,7 +314,7 @@ class ConfirmOrderView(APIView):
                     order = serializer.create_order(
                         stripe_payment_intent_id=payment_intent_id,
                         payment_method=actual_payment_method,
-                        payment_currency='USD',
+                        payment_currency=payment_currency,
                         exchange_rate=exchange_rate,
                         total_usd=total_usd,
                     )
@@ -348,11 +324,10 @@ class ConfirmOrderView(APIView):
 
                     logger.info(
                         f"Order {order.order_number} created - "
-                        f"HK${order.total}, US${total_usd}, Method: {actual_payment_method}"
+                        f"HK${order.total}, {payment_currency}, Method: {actual_payment_method}"
                     )
 
             except IntegrityError as e:
-                # Race condition: another request already created the order
                 logger.warning(f"IntegrityError (race condition): {str(e)}")
                 existing_order = Order.objects.get(stripe_payment_intent_id=payment_intent_id)
                 return Response(
@@ -360,7 +335,7 @@ class ConfirmOrderView(APIView):
                     status=status.HTTP_200_OK
                 )
 
-            # STEP 6: Send confirmation email (non-blocking on failure)
+            # STEP 6: Send confirmation email
             try:
                 send_order_confirmation_email(order)
             except Exception as e:
@@ -377,6 +352,40 @@ class ConfirmOrderView(APIView):
                 {'error': '系統錯誤,請聯絡客服'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+    def _detect_payment_method(self, payment_intent):
+        """Detect actual payment method from Payment Intent"""
+        payment_method_obj = payment_intent.payment_method
+
+        if isinstance(payment_method_obj, str):
+            payment_method_details = stripe.PaymentMethod.retrieve(payment_method_obj)
+        else:
+            payment_method_details = payment_method_obj
+
+        if not payment_method_details:
+            return 'card_pay'
+
+        pm_type = payment_method_details.type
+
+        if pm_type == 'alipay':
+            return 'alipay'
+        elif pm_type == 'wechat_pay':
+            return 'wechat_pay'
+        elif pm_type == 'card':
+            if hasattr(payment_method_details, 'card') and payment_method_details.card:
+                wallet = getattr(payment_method_details.card, 'wallet', None)
+                if wallet:
+                    wallet_type = (
+                        wallet.get('type')
+                        if isinstance(wallet, dict)
+                        else getattr(wallet, 'type', None)
+                    )
+                    if wallet_type == 'google_pay':
+                        return 'google_pay'
+                    elif wallet_type == 'apple_pay':
+                        return 'apple_pay'
+
+        return 'card_pay'
 
 
 class OrderDetailView(APIView):
@@ -405,13 +414,7 @@ class OrderDetailView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class StripeWebhookView(APIView):
-    """
-    Handle Stripe webhook events.
-
-    Stripe sends webhooks for all payment events, including redirect-based
-    methods like AliPay and WeChat Pay. This provides a server-side safety
-    net in case the user closes the browser before the return page runs.
-    """
+    """Handle Stripe webhook events"""
 
     authentication_classes = []
     permission_classes = []
@@ -442,7 +445,7 @@ class StripeWebhookView(APIView):
 
         logger.info(f"Webhook received: {event_type} — {event_id}")
 
-        # Deduplication: safe get_or_create prevents double-processing
+        # Deduplication
         already_processed, _created = StripeWebhookEvent.objects.get_or_create(
             event_id=event_id,
             defaults={'event_type': event_type}
@@ -462,11 +465,7 @@ class StripeWebhookView(APIView):
         return HttpResponse(status=200)
 
     def handle_payment_success(self, payment_intent):
-        """
-        Marks the order as paid when Stripe confirms payment succeeded.
-        This is especially important for AliPay and WeChat Pay where the
-        user might close the browser before hitting our return_url.
-        """
+        """Mark order as paid when Stripe confirms payment succeeded"""
         pi_id = payment_intent['id']
         try:
             order = Order.objects.get(stripe_payment_intent_id=pi_id)
