@@ -47,7 +47,7 @@ class OrderSerializer(serializers.ModelSerializer):
             'payment_status',
             'payment_currency',
             'exchange_rate',
-            'total_usd',
+            'total_cny',
             'subtotal',
             'delivery_fee',
             'discount',
@@ -185,7 +185,7 @@ class CheckoutSerializer(serializers.Serializer):
         return subtotal, delivery_fee, discount, total
 
     def create_order(self, stripe_payment_intent_id=None, payment_method=None,
-                     payment_currency='HKD', exchange_rate=None, total_usd=None):
+                     payment_currency='HKD', exchange_rate=None, total_cny=None):
         from django.db import transaction
         validated_data = self.validated_data
 
@@ -229,7 +229,7 @@ class CheckoutSerializer(serializers.Serializer):
                 status='pending',
                 payment_currency=payment_currency,
                 exchange_rate=exchange_rate,
-                total_usd=total_usd,
+                total_cny=total_cny,
                 language=validated_data.get('language', 'zh-HK'),  # ← new
             )
 

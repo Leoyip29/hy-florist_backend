@@ -28,7 +28,7 @@ class CreatePaymentIntentView(APIView):
     - User selects payment method FIRST on frontend
     - Backend creates ONLY ONE Payment Intent in appropriate currency
     - Cards/Wallets → HKD Payment Intent
-    - AliPay/WeChat Pay → USD Payment Intent
+    - AliPay/WeChat Pay → CNY Payment Intent (native currency, works across all Stripe regions)
 
     Request must include:
     - selected_payment_method: 'card' | 'alipay' | 'wechat_pay'
@@ -38,8 +38,8 @@ class CreatePaymentIntentView(APIView):
         'card': 'hkd',  # Cards, Apple Pay, Google Pay
         'apple_pay': 'hkd',
         'google_pay': 'hkd',
-        'alipay': 'usd',  # AliPay & WeChat Pay → USD (Stripe requirement)
-        'wechat_pay': 'usd',  # WeChat Pay (same as AliPay, both use USD)
+        'alipay': 'cny',  # AliPay & WeChat Pay → CNY (native currency, consistent across all Stripe regions)
+        'wechat_pay': 'cny',  # WeChat Pay (CNY is supported in every Stripe account region)
     }
 
     def post(self, request):
@@ -125,37 +125,38 @@ class CreatePaymentIntentView(APIView):
                     'displayAmount': f'HK${total_hkd:.2f}',
                     'conversionDetails': {
                         'amountHKD': float(total_hkd),
-                        'amountUSD': None,
+                        'amountCNY': None,
                         'exchangeRate': None,
                     }
                 }
 
-            else:  # USD for AliPay / WeChat Pay
+            else:  # CNY for AliPay / WeChat Pay
                 # ============================================================
-                # USD PAYMENT INTENT (AliPay & WeChat Pay)
-                # Both payment methods use USD and are enabled together
+                # CNY PAYMENT INTENT (AliPay & WeChat Pay)
+                # CNY is the native currency for both methods and is supported
+                # consistently across all Stripe account regions.
                 # ============================================================
                 # Get exchange rate
                 currency_rate = CurrencyRate.objects.filter(
-                    base_currency='USD',
+                    base_currency='CNY',
                     target_currency='HKD'
                 ).order_by('-created_at').first()
 
                 if not currency_rate:
-                    logger.error("No USD to HKD exchange rate found")
+                    logger.error("No CNY to HKD exchange rate found")
                     return Response(
                         {'error': '暫時無法處理付款,請稍後再試'},
                         status=status.HTTP_400_BAD_REQUEST
                     )
 
                 exchange_rate = currency_rate.rate
-                total_usd = (total_hkd / exchange_rate).quantize(Decimal('0.01'))
+                total_cny = (total_hkd / exchange_rate).quantize(Decimal('0.01'))
 
-                amount = int(total_usd * 100)
-                currency = 'usd'
+                amount = int(total_cny * 100)
+                currency = 'cny'
 
-                # Add USD-specific metadata
-                metadata['total_usd'] = str(total_usd)
+                # Add CNY-specific metadata
+                metadata['total_cny'] = str(total_cny)
                 metadata['exchange_rate'] = str(exchange_rate)
 
                 # Enable BOTH AliPay and WeChat Pay in the Payment Element
@@ -168,20 +169,20 @@ class CreatePaymentIntentView(APIView):
                 )
 
                 logger.info(
-                    f"USD Payment Intent created: {payment_intent.id}, "
-                    f"Amount: US${total_usd} (HK${total_hkd}), "
-                    f"Rate: {exchange_rate}, Selected: {selected_method}"
+                    f"CNY Payment Intent created: {payment_intent.id}, "
+                    f"Amount: CN¥{total_cny} (HK${total_hkd}), "
+                    f"Rate: 1 CNY = {exchange_rate} HKD, Selected: {selected_method}"
                 )
 
                 response_data = {
                     'clientSecret': payment_intent.client_secret,
                     'paymentIntentId': payment_intent.id,
-                    'currency': 'usd',
-                    'amount': float(total_usd),
-                    'displayAmount': f'US${total_usd:.2f}',
+                    'currency': 'cny',
+                    'amount': float(total_cny),
+                    'displayAmount': f'CN¥{total_cny:.2f}',
                     'conversionDetails': {
                         'amountHKD': float(total_hkd),
-                        'amountUSD': float(total_usd),
+                        'amountCNY': float(total_cny),
                         'exchangeRate': float(exchange_rate),
                     }
                 }
@@ -206,7 +207,7 @@ class CreatePaymentIntentView(APIView):
 class ConfirmOrderView(APIView):
     """
     Confirm order after successful payment.
-    Handles both HKD and USD Payment Intents seamlessly.
+    Handles both HKD and CNY Payment Intents seamlessly.
     """
 
     def post(self, request):
@@ -243,12 +244,12 @@ class ConfirmOrderView(APIView):
                 # Get HKD total from metadata
                 total_hkd = Decimal(payment_intent.metadata.get('total_hkd', '0'))
 
-                # Get USD details if payment was in USD
-                if payment_currency == 'USD':
-                    total_usd = Decimal(payment_intent.metadata.get('total_usd', '0'))
+                # Get CNY details if payment was in CNY
+                if payment_currency == 'CNY':
+                    total_cny = Decimal(payment_intent.metadata.get('total_cny', '0'))
                     exchange_rate = Decimal(payment_intent.metadata.get('exchange_rate', '0'))
                 else:
-                    total_usd = None
+                    total_cny = None
                     exchange_rate = None
 
                 # Detect actual payment method used
@@ -316,7 +317,7 @@ class ConfirmOrderView(APIView):
                         payment_method=actual_payment_method,
                         payment_currency=payment_currency,
                         exchange_rate=exchange_rate,
-                        total_usd=total_usd,
+                        total_cny=total_cny,
                     )
 
                     order.mark_as_paid(payment_intent_id)

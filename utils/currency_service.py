@@ -11,15 +11,18 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 # Fallback exchange rate if database is empty AND API fails
-FALLBACK_RATE = Decimal('7.80')
+# 1 CNY = ~1.077 HKD (approximate; HKD/USD ~7.80, CNY/USD ~7.25)
+FALLBACK_RATE = Decimal('1.077')
 
 
 def fetch_exchange_rate_from_api():
     """
-    Fetch current USD to HKD exchange rate from ExchangeRate-API.
+    Fetch current CNY/HKD exchange rate from ExchangeRate-API.
+    Uses USD as intermediary: fetches both HKD and CNY rates against USD,
+    then computes how many HKD equal 1 CNY.
 
     Returns:
-        Decimal: Exchange rate (1 USD = X HKD) or None if failed
+        Decimal: Exchange rate (1 CNY = X HKD) or None if failed
     """
     try:
         api_key = getattr(settings, 'EXCHANGERATE_API_KEY', None)
@@ -40,14 +43,18 @@ def fetch_exchange_rate_from_api():
 
         if data.get('result') == 'success':
             hkd_rate = Decimal(str(data['conversion_rates']['HKD']))
+            cny_rate = Decimal(str(data['conversion_rates']['CNY']))
 
-            # Validate rate is reasonable (HKD typically 7.75 - 7.85)
-            if Decimal('7.50') <= hkd_rate <= Decimal('8.50'):
-                logger.info(f"Successfully fetched rate: 1 USD = {hkd_rate} HKD")
-                return hkd_rate
+            # 1 CNY = (HKD_rate / CNY_rate) HKD
+            cny_to_hkd = (hkd_rate / cny_rate).quantize(Decimal('0.000001'))
+
+            # Validate rate is reasonable (1 CNY typically 1.05 - 1.15 HKD)
+            if Decimal('1.00') <= cny_to_hkd <= Decimal('1.30'):
+                logger.info(f"Successfully fetched rate: 1 CNY = {cny_to_hkd} HKD")
+                return cny_to_hkd
             else:
                 logger.error(
-                    f"Rate {hkd_rate} outside expected range (7.50-8.50), rejecting"
+                    f"Rate {cny_to_hkd} outside expected range (1.00-1.30), rejecting"
                 )
                 return None
         else:
@@ -96,13 +103,13 @@ def update_exchange_rate():
             else:
                 # No rate in database either - store fallback
                 CurrencyRate.objects.create(
-                    base_currency='USD',
+                    base_currency='CNY',
                     target_currency='HKD',
                     rate=FALLBACK_RATE
                 )
                 message = (
                     f"API failed and no database rate exists. "
-                    f"Stored fallback rate: {FALLBACK_RATE} HKD"
+                    f"Stored fallback rate: 1 CNY = {FALLBACK_RATE} HKD"
                 )
                 logger.error(message)
 
@@ -113,12 +120,12 @@ def update_exchange_rate():
 
         # API succeeded - save to database
         currency_rate = CurrencyRate.objects.create(
-            base_currency='USD',
+            base_currency='CNY',
             target_currency='HKD',
             rate=rate
         )
 
-        message = f"Successfully updated exchange rate: 1 USD = {rate} HKD"
+        message = f"Successfully updated exchange rate: 1 CNY = {rate} HKD"
         logger.info(message)
 
         # Cleanup old rates (keep last 90 days)
@@ -141,12 +148,12 @@ def update_exchange_rate():
             return False, FALLBACK_RATE, f"{message}. Using fallback: {FALLBACK_RATE}"
 
 
-def get_latest_rate(base_currency='USD', target_currency='HKD'):
+def get_latest_rate(base_currency='CNY', target_currency='HKD'):
     """
     Get the most recent exchange rate for a currency pair from database.
 
     Args:
-        base_currency: Source currency code (default: USD)
+        base_currency: Source currency code (default: CNY)
         target_currency: Target currency code (default: HKD)
 
     Returns:
@@ -183,7 +190,7 @@ def get_exchange_rate():
     This is called during payment processing.
 
     Returns:
-        Decimal: Exchange rate (1 USD = X HKD)
+        Decimal: Exchange rate (1 CNY = X HKD)
     """
     # Get latest rate from database
     rate = get_latest_rate()
@@ -192,33 +199,33 @@ def get_exchange_rate():
         logger.warning(f"No rate in database, using fallback: {FALLBACK_RATE}")
         rate = FALLBACK_RATE
 
-    logger.info(f"Using exchange rate: 1 USD = {rate} HKD")
+    logger.info(f"Using exchange rate: 1 CNY = {rate} HKD")
 
     return rate
 
 
-def convert_hkd_to_usd(amount_hkd):
+def convert_hkd_to_cny(amount_hkd):
     """
-    Convert HKD amount to USD using database exchange rate.
+    Convert HKD amount to CNY using database exchange rate.
 
     Args:
         amount_hkd: Amount in HKD (Decimal or float)
 
     Returns:
-        tuple: (amount_usd, exchange_rate_used)
+        tuple: (amount_cny, exchange_rate_used)
     """
     if not isinstance(amount_hkd, Decimal):
         amount_hkd = Decimal(str(amount_hkd))
 
     exchange_rate = get_exchange_rate()
-    amount_usd = (amount_hkd / exchange_rate).quantize(Decimal('0.01'))
+    amount_cny = (amount_hkd / exchange_rate).quantize(Decimal('0.01'))
 
     logger.info(
-        f"Currency conversion: HKD {amount_hkd} → USD {amount_usd} "
-        f"(rate: 1 USD = {exchange_rate} HKD)"
+        f"Currency conversion: HKD {amount_hkd} → CNY {amount_cny} "
+        f"(rate: 1 CNY = {exchange_rate} HKD)"
     )
 
-    return amount_usd, exchange_rate
+    return amount_cny, exchange_rate
 
 
 def get_payment_currency(payment_method):
@@ -229,10 +236,10 @@ def get_payment_currency(payment_method):
         payment_method: Payment method identifier
 
     Returns:
-        str: 'HKD' or 'USD'
+        str: 'HKD' or 'CNY'
     """
-    if payment_method == 'alipay':
-        return 'USD'
+    if payment_method in ('alipay', 'wechat_pay'):
+        return 'CNY'
     return 'HKD'
 
 
@@ -244,7 +251,7 @@ def get_stripe_currency(payment_method):
         payment_method: Payment method identifier
 
     Returns:
-        str: Stripe currency code ('hkd' or 'usd')
+        str: Stripe currency code ('hkd' or 'cny')
     """
     currency = get_payment_currency(payment_method)
     return currency.lower()
@@ -278,7 +285,7 @@ def cleanup_old_rates(days_to_keep=90):
     return deleted_count
 
 
-def get_rate_history(base_currency='USD', target_currency='HKD', days=30):
+def get_rate_history(base_currency='CNY', target_currency='HKD', days=30):
     """
     Get historical rates for charting/analysis.
 
@@ -314,7 +321,7 @@ def get_rate_info():
 
     try:
         latest = CurrencyRate.objects.filter(
-            base_currency='USD',
+            base_currency='CNY',
             target_currency='HKD'
         ).first()
 

@@ -150,7 +150,7 @@ class CreatePayMeOrderView(APIView):
                     payment_method='payme',
                     payment_currency='HKD',
                     exchange_rate=None,
-                    total_usd=None,
+                    total_cny=None,
                 )
                 # Explicitly keep status pending — admin confirms later
                 order.payment_status = 'pending'

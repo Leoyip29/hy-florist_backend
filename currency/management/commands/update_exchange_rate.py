@@ -51,7 +51,7 @@ class Command(BaseCommand):
         if rate_info.get('rate'):
             self.stdout.write(
                 self.style.SUCCESS(
-                    f'Rate: 1 USD = {rate_info["rate"]} HKD'
+                    f'Rate: 1 CNY = {rate_info["rate"]} HKD'
                 )
             )
             self.stdout.write(f'Created: {rate_info["created_at"]}')
@@ -96,7 +96,7 @@ class Command(BaseCommand):
 
         # Display in table format
         self.stdout.write(
-            f'{"Date":<12} {"Time":<8} {"Rate (USD → HKD)":<20}'
+            f'{"Date":<12} {"Time":<8} {"Rate (CNY → HKD)":<20}'
         )
         self.stdout.write('-' * 40)
 
@@ -151,13 +151,13 @@ class Command(BaseCommand):
                 self.stdout.write(
                     self.style.SUCCESS(f'✓ {message}')
                 )
-                self.stdout.write(f'  Rate: 1 USD = {rate} HKD')
+                self.stdout.write(f'  Rate: 1 CNY = {rate} HKD')
 
                 # Show test conversion
-                test_hkd = Decimal('780.00')
-                test_usd = test_hkd / rate
+                test_hkd = Decimal('100.00')
+                test_cny = test_hkd / rate
                 self.stdout.write(
-                    f'\n💱 Test Conversion: HKD ${test_hkd} = USD ${test_usd:.2f}'
+                    f'\n💱 Test Conversion: HKD ${test_hkd} = CN¥{test_cny:.2f}'
                 )
 
             else:
@@ -165,18 +165,18 @@ class Command(BaseCommand):
                     self.style.WARNING(f'⚠ {message}')
                 )
                 if rate:
-                    self.stdout.write(f'  Using rate: 1 USD = {rate} HKD')
+                    self.stdout.write(f'  Using rate: 1 CNY = {rate} HKD')
 
             # Show database stats
             total_records = CurrencyRate.objects.filter(
-                base_currency='USD',
+                base_currency='CNY',
                 target_currency='HKD'
             ).count()
-            self.stdout.write(f'\nTotal USD→HKD records in database: {total_records}')
+            self.stdout.write(f'\nTotal CNY→HKD records in database: {total_records}')
 
             # Show oldest and newest
             oldest = CurrencyRate.objects.filter(
-                base_currency='USD',
+                base_currency='CNY',
                 target_currency='HKD'
             ).order_by('created_at').first()
 

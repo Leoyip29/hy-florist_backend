@@ -174,7 +174,7 @@ class OrderAdmin(admin.ModelAdmin):
                 'confirmed_at',
                 'payment_currency',
                 'exchange_rate',
-                'total_usd',
+                'total_cny',
             )
         }),
         ('Totals', {
