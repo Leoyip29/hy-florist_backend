@@ -43,3 +43,21 @@ class ProductImage(WithTimeStamps):
 
     def __str__(self):
         return f"{self.product.name} Image"
+
+
+# Product Option Model - for products with selectable options (like board types)
+class ProductOption(WithTimeStamps):
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='options')
+    name = models.CharField(max_length=100)  # e.g., "十字架", "圓型", "心型"
+    name_en = models.CharField(max_length=100)  # e.g., "Cross", "Round", "Heart-shaped"
+    # Optional price adjustment - some options might cost more
+    price_adjustment = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    # Optional image for this specific option
+    image = models.ImageField(upload_to='products/options/', null=True, blank=True)
+    image_url = models.URLField(max_length=1000, null=True, blank=True)
+
+    class Meta:
+        ordering = ['id']
+
+    def __str__(self):
+        return f"{self.product.name} - {self.name}"
