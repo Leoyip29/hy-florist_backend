@@ -6,6 +6,8 @@ from utils.models import WithTimeStamps
 # Product Category Model
 class ProductCategory(WithTimeStamps):
     name = models.CharField(max_length=100, unique=True)
+    # Active flag - can be disabled from admin
+    is_active = models.BooleanField(default=True)
 
     def __str__(self):
         return self.name
@@ -25,6 +27,9 @@ class Product(WithTimeStamps):
 
     # Hot seller flag - shows products at top when sorting by hot selling
     is_hot_seller = models.BooleanField(default=False)
+    
+    # Active flag - can be disabled from admin
+    is_active = models.BooleanField(default=True)
 
     # Relationships
     categories = models.ManyToManyField(ProductCategory, related_name='products')

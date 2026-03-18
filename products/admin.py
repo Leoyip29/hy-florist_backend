@@ -49,6 +49,8 @@ class ProductOptionInline(admin.TabularInline):
 
 @admin.register(ProductCategory)
 class ProductCategoryAdmin(admin.ModelAdmin):
+    list_display = ("id", "name", "is_active", "created_at")
+    list_filter = ("is_active",)
     search_fields = ("name",)
 
 
@@ -59,7 +61,8 @@ class SuitableLocationAdmin(admin.ModelAdmin):
 
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
-    list_display = ("id", "name", "price", "is_hot_seller", "created_at")
+    list_display = ("id", "name", "price", "is_active", "is_hot_seller", "created_at")
+    list_filter = ("is_active", "is_hot_seller", "categories")
     search_fields = ("name",)
     filter_horizontal = ("categories", "suitable_locations")
     inlines = (ProductImageInline, ProductOptionInline)

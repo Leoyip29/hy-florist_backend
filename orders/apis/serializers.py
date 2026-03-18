@@ -10,6 +10,7 @@ class OrderItemSerializer(serializers.Serializer):
     """Serializer for creating order items"""
     product_id = serializers.IntegerField()
     quantity = serializers.IntegerField(min_value=1)
+    selected_option_id = serializers.IntegerField(required=False, allow_null=True)
 
 
 class OrderItemDetailSerializer(serializers.ModelSerializer):
@@ -23,6 +24,7 @@ class OrderItemDetailSerializer(serializers.ModelSerializer):
             'product_price',
             'quantity',
             'line_total',
+            'option_name',
         ]
 
 
@@ -40,6 +42,8 @@ class OrderSerializer(serializers.ModelSerializer):
             'customer_email',
             'customer_phone',
             'delivery_address',
+            'delivery_region',
+            'delivery_district',
             'delivery_date',
             'delivery_notes',
             'payment_method',
@@ -98,6 +102,18 @@ class CheckoutSerializer(serializers.Serializer):
         }
     )
 
+    delivery_region = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=100
+    )
+
+    delivery_district = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=100
+    )
+
     delivery_date = serializers.DateField(
         error_messages={
             'invalid': 'Please provide a valid delivery date',
@@ -113,7 +129,7 @@ class CheckoutSerializer(serializers.Serializer):
 
     # Payment Information
     payment_method = serializers.ChoiceField(
-        choices=['card_pay', 'apple_pay', 'google_pay', 'payme', 'alipay', 'wechat_pay'],
+        choices=['card_pay', 'apple_pay', 'google_pay', 'payme', 'whatsapp', 'alipay', 'wechat_pay'],
         default='card_pay'
     )
 
@@ -175,7 +191,19 @@ class CheckoutSerializer(serializers.Serializer):
         for item_data in self.validated_data['items']:
             product = Product.objects.get(id=item_data['product_id'])
             quantity = item_data['quantity']
-            price = Decimal(str(product.price))
+            
+            # Get selected option if provided
+            selected_option_id = item_data.get('selected_option_id')
+            if selected_option_id:
+                try:
+                    from products.models import ProductOption
+                    option = ProductOption.objects.get(id=selected_option_id, product=product)
+                    price = Decimal(str(product.price)) + Decimal(str(option.price_adjustment))
+                except ProductOption.DoesNotExist:
+                    price = Decimal(str(product.price))
+            else:
+                price = Decimal(str(product.price))
+            
             subtotal += price * quantity
 
         delivery_fee = Decimal('0.00')
@@ -195,7 +223,22 @@ class CheckoutSerializer(serializers.Serializer):
         for item_data in validated_data['items']:
             product = Product.objects.get(id=item_data['product_id'])
             quantity = item_data['quantity']
-            price = Decimal(str(product.price))
+            
+            # Get selected option if provided
+            option_name = None
+            selected_option_id = item_data.get('selected_option_id')
+            if selected_option_id:
+                try:
+                    from products.models import ProductOption
+                    option = ProductOption.objects.get(id=selected_option_id, product=product)
+                    option_name = option.name
+                    # Add price adjustment
+                    price = Decimal(str(product.price)) + Decimal(str(option.price_adjustment))
+                except ProductOption.DoesNotExist:
+                    price = Decimal(str(product.price))
+            else:
+                price = Decimal(str(product.price))
+            
             line_total = price * quantity
 
             primary_image = product.images.filter(is_primary=True).first()
@@ -207,6 +250,7 @@ class CheckoutSerializer(serializers.Serializer):
                 'product_price': price,
                 'quantity': quantity,
                 'line_total': line_total,
+                'option_name': option_name,
             })
 
         final_payment_method = payment_method or validated_data['payment_method']
@@ -217,6 +261,8 @@ class CheckoutSerializer(serializers.Serializer):
                 customer_email=validated_data['customer_email'],
                 customer_phone=validated_data['customer_phone'],
                 delivery_address=validated_data['delivery_address'],
+                delivery_region=validated_data.get('delivery_region', ''),
+                delivery_district=validated_data.get('delivery_district', ''),
                 delivery_notes=validated_data.get('delivery_notes', ''),
                 delivery_date=validated_data.get('delivery_date', ''),
                 payment_method=final_payment_method,

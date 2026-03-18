@@ -106,7 +106,7 @@ confirm_payme_payment.short_description = "✅ Confirm PayMe Payment (mark as pa
 class OrderItemInline(admin.TabularInline):
     model = OrderItem
     extra = 0
-    readonly_fields = ['product', 'product_name', 'product_price', 'quantity', 'line_total']
+    readonly_fields = ['product', 'product_name', 'product_price', 'quantity', 'line_total', 'option_name']
     can_delete = False
 
 
@@ -160,7 +160,7 @@ class OrderAdmin(admin.ModelAdmin):
             'fields': ('customer_name', 'customer_email', 'customer_phone')
         }),
         ('Delivery', {
-            'fields': ('delivery_address', 'delivery_date', 'delivery_notes')
+            'fields': ('delivery_address', 'delivery_region', 'delivery_district', 'delivery_date', 'delivery_notes')
         }),
         ('Payment', {
             'fields': (
@@ -267,6 +267,7 @@ class OrderAdmin(admin.ModelAdmin):
     def payment_method_badge(self, obj):
         colours = {
             'payme':      ('#E60028', '📱 PayMe'),
+            'whatsapp':   ('#25D366', '💬 WhatsApp'),
             'card_pay':   ('#1a1a1a', '💳 Card'),
             'apple_pay':  ('#000000', '🍎 Apple Pay'),
             'google_pay': ('#4285F4', '🇬 Google Pay'),

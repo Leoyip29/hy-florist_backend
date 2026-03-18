@@ -2,6 +2,7 @@ from rest_framework.generics import ListAPIView, RetrieveAPIView
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from django.db import models
+from django.db.models import F, Value, FloatField
 from products.models import Product
 from .serializers import ProductListSerializer
 
@@ -17,7 +18,7 @@ class ProductListAPIView(ListAPIView):
     pagination_class = ProductPagination
 
     def get_queryset(self):
-        queryset = Product.objects.all()
+        queryset = Product.objects.filter(is_active=True)
         
         # Get filter parameters
         category = self.request.query_params.get('category', None)
@@ -28,9 +29,9 @@ class ProductListAPIView(ListAPIView):
         # Filter by category (supports both Chinese and English category names)
         if category and category.lower() != 'all' and category != '全部':
             from products.models import ProductCategory
-            cats = ProductCategory.objects.filter(name=category)
+            cats = ProductCategory.objects.filter(name=category, is_active=True)
             if not cats.exists():
-                cats = ProductCategory.objects.filter(name__iexact=category)
+                cats = ProductCategory.objects.filter(name__iexact=category, is_active=True)
             if cats.exists():
                 queryset = queryset.filter(categories__in=cats).distinct()
 
@@ -60,8 +61,29 @@ class ProductListAPIView(ListAPIView):
         if sort == 'price_desc':
             return queryset.order_by('-price')
 
-        # Default: hot sellers first, then by newest
-        return queryset.order_by('-is_hot_seller', '-created_at')
+        # Default: medium price first, then cheapest to highest
+        # Calculate median price from the queryset
+        # Get all prices from the filtered queryset
+        prices = list(queryset.values_list('price', flat=True))
+        
+        if prices:
+            # Calculate median
+            sorted_prices = sorted(prices)
+            n = len(sorted_prices)
+            if n % 2 == 0:
+                median_price = (sorted_prices[n // 2 - 1] + sorted_prices[n // 2]) / 2
+            else:
+                median_price = sorted_prices[n // 2]
+            
+            # Order by: closest to median first, then by price ascending
+            from django.db.models.functions import Abs, Cast
+            
+            # Cast price to float for proper distance calculation
+            queryset = queryset.annotate(
+                distance_from_median=Abs(Cast(F('price'), output_field=FloatField()) - Value(float(median_price)))
+            ).order_by('distance_from_median', 'price')
+        
+        return queryset
 
 
 class ProductByIdsAPIView(ListAPIView):
@@ -93,7 +115,7 @@ class CategoryListAPIView(ListAPIView):
     def list(self, request, *args, **kwargs):
         from products.models import ProductCategory, SuitableLocation
         
-        categories = list(ProductCategory.objects.values_list('name', flat=True))
+        categories = list(ProductCategory.objects.filter(is_active=True).values_list('name', flat=True))
         locations = list(SuitableLocation.objects.values_list('name', flat=True))
         
         return Response({

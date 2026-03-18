@@ -15,6 +15,7 @@ class Order(WithTimeStamps):
         ('apple_pay', 'Apple Pay'),
         ('google_pay', 'Google Pay'),
         ('payme', 'PayMe'),
+        ('whatsapp', 'WhatsApp'),
         ('alipay', 'AliPay'),
         ('wechat_pay', 'WeChat Pay'),
     ]
@@ -57,6 +58,18 @@ class Order(WithTimeStamps):
     # Delivery information
     delivery_address = models.TextField(
         help_text="Full delivery address"
+    )
+    delivery_region = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        help_text="Delivery region (e.g., Hong Kong Island, Kowloon, New Territories)"
+    )
+    delivery_district = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        help_text="Delivery district"
     )
     delivery_date = models.DateField(
         help_text="Requested delivery date (must be at least 3 days in advance)",
@@ -236,6 +249,7 @@ class Order(WithTimeStamps):
             'apple_pay': 'Apple Pay',
             'google_pay': 'Google Pay',
             'payme': 'PayMe',
+            'whatsapp': 'WhatsApp',
             'alipay': 'AliPay',
             'wechat_pay': 'WeChat Pay',
         }
@@ -281,6 +295,14 @@ class OrderItem(WithTimeStamps):
         max_digits=10,
         decimal_places=2,
         help_text="Total for this line (quantity × price)"
+    )
+
+    # Store the selected option name (e.g., "十字架", "圓型", "心型" for board sets)
+    option_name = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        help_text="Selected product option name"
     )
 
     class Meta:
