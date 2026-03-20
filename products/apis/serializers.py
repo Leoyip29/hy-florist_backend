@@ -1,5 +1,11 @@
 from rest_framework import serializers
-from products.models import Product, ProductCategory, SuitableLocation, ProductImage
+from products.models import Product, ProductCategory, SuitableLocation, ProductImage, ProductOption
+
+
+class ProductOptionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProductOption
+        fields = ["id", "name", "name_en", "price_adjustment", "image", "image_url"]
 
 
 class ProductCategorySerializer(serializers.ModelSerializer):
@@ -24,6 +30,7 @@ class ProductListSerializer(serializers.ModelSerializer):
     categories = ProductCategorySerializer(many=True)
     suitable_locations = SuitableLocationSerializer(many=True)
     images = ProductImageSerializer(many=True)
+    options = ProductOptionSerializer(many=True)
 
     class Meta:
         model = Product
@@ -36,4 +43,5 @@ class ProductListSerializer(serializers.ModelSerializer):
             "categories",
             "suitable_locations",
             "images",
+            "options",
         ]

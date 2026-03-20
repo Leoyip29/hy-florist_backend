@@ -125,7 +125,7 @@ class CreatePaymentIntentView(APIView):
         except stripe.error.InvalidRequestError as e:
             logger.error(f"Invalid Stripe request: {str(e)}", exc_info=True)
             return Response(
-                {'error': '系統錯誤,請稍後再試'},
+                {'error': f'系統錯誤,請稍後再試: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
