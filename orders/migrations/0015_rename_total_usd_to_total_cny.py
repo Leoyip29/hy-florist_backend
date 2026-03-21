@@ -18,7 +18,27 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.RunSQL(
-            sql="ALTER TABLE orders_order RENAME COLUMN total_usd TO total_cny;",
-            reverse_sql="ALTER TABLE orders_order RENAME COLUMN total_cny TO total_usd;",
+            sql="""
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name='orders_order' AND column_name='total_usd'
+                    ) THEN
+                        ALTER TABLE orders_order RENAME COLUMN total_usd TO total_cny;
+                    END IF;
+                END $$;
+            """,
+            reverse_sql="""
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name='orders_order' AND column_name='total_cny'
+                    ) THEN
+                        ALTER TABLE orders_order RENAME COLUMN total_cny TO total_usd;
+                    END IF;
+                END $$;
+            """,
         ),
     ]
