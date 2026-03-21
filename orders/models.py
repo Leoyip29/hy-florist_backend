@@ -15,6 +15,7 @@ class Order(WithTimeStamps):
         ('apple_pay', 'Apple Pay'),
         ('google_pay', 'Google Pay'),
         ('payme', 'PayMe'),
+        ('whatsapp', 'WhatsApp'),
         ('alipay', 'AliPay'),
         ('wechat_pay', 'WeChat Pay'),
     ]
@@ -57,6 +58,18 @@ class Order(WithTimeStamps):
     # Delivery information
     delivery_address = models.TextField(
         help_text="Full delivery address"
+    )
+    delivery_region = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        help_text="Delivery region (e.g., Hong Kong Island, Kowloon, New Territories)"
+    )
+    delivery_district = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        help_text="Delivery district"
     )
     delivery_date = models.DateField(
         help_text="Requested delivery date (must be at least 3 days in advance)",
@@ -144,21 +157,22 @@ class Order(WithTimeStamps):
     payment_currency = models.CharField(
         max_length=3,
         default='HKD',
-        help_text="Currency used for payment (HKD or USD)"
+        help_text="Currency used for payment (HKD)"
     )
     exchange_rate = models.DecimalField(
         max_digits=10,
         decimal_places=6,
         null=True,
         blank=True,
-        help_text="Exchange rate applied (HKD to USD) if payment was in USD"
+        help_text="Exchange rate (unused, kept for backwards compatibility)"
     )
     total_usd = models.DecimalField(
         max_digits=10,
         decimal_places=2,
         null=True,
         blank=True,
-        help_text="Total amount in USD (for AliPay / WeChat Pay payments)"
+        db_column='total_cny',
+        help_text="Unused, kept for backwards compatibility"
     )
 
     language = models.CharField(
@@ -236,6 +250,7 @@ class Order(WithTimeStamps):
             'apple_pay': 'Apple Pay',
             'google_pay': 'Google Pay',
             'payme': 'PayMe',
+            'whatsapp': 'WhatsApp',
             'alipay': 'AliPay',
             'wechat_pay': 'WeChat Pay',
         }
@@ -281,6 +296,14 @@ class OrderItem(WithTimeStamps):
         max_digits=10,
         decimal_places=2,
         help_text="Total for this line (quantity × price)"
+    )
+
+    # Store the selected option name (e.g., "十字架", "圓型", "心型" for board sets)
+    option_name = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        help_text="Selected product option name"
     )
 
     class Meta:
