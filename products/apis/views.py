@@ -19,7 +19,7 @@ class ProductListAPIView(ListAPIView):
 
     def get_queryset(self):
         queryset = Product.objects.filter(is_active=True)
-        
+
         # Get filter parameters
         category = self.request.query_params.get('category', None)
         location = self.request.query_params.get('location', None)
@@ -47,17 +47,17 @@ class ProductListAPIView(ListAPIView):
         # Search by name or description
         if search:
             queryset = queryset.filter(
-                models.Q(name__icontains=search) | 
+                models.Q(name__icontains=search) |
                 models.Q(description__icontains=search)
             )
 
         # Apply sorting
         if sort == 'hot':
             return queryset.filter(is_hot_seller=True).order_by('-created_at')
-        
+
         if sort == 'price_asc':
             return queryset.order_by('price')
-        
+
         if sort == 'price_desc':
             return queryset.order_by('-price')
 
@@ -65,7 +65,7 @@ class ProductListAPIView(ListAPIView):
         # Calculate median price from the queryset
         # Get all prices from the filtered queryset
         prices = list(queryset.values_list('price', flat=True))
-        
+
         if prices:
             # Calculate median
             sorted_prices = sorted(prices)
@@ -74,15 +74,15 @@ class ProductListAPIView(ListAPIView):
                 median_price = (sorted_prices[n // 2 - 1] + sorted_prices[n // 2]) / 2
             else:
                 median_price = sorted_prices[n // 2]
-            
+
             # Order by: closest to median first, then by price ascending
             from django.db.models.functions import Abs, Cast
-            
+
             # Cast price to float for proper distance calculation
             queryset = queryset.annotate(
                 distance_from_median=Abs(Cast(F('price'), output_field=FloatField()) - Value(float(median_price)))
-            ).order_by('distance_from_median', 'price')
-        
+            ).order_by('distance_from_median', 'price', 'id')
+
         return queryset
 
 
@@ -97,7 +97,7 @@ class ProductByIdsAPIView(ListAPIView):
         ids_param = self.request.query_params.get('ids', '')
         if not ids_param:
             return Product.objects.none()
-        
+
         # Convert comma-separated string to list of integers
         try:
             ids_list = [int(id.strip()) for id in ids_param.split(',') if id.strip().isdigit()]
@@ -111,13 +111,13 @@ class CategoryListAPIView(ListAPIView):
     API endpoint to get all categories and locations.
     Returns: { categories: [...], locations: [...] }
     """
-    
+
     def list(self, request, *args, **kwargs):
         from products.models import ProductCategory, SuitableLocation
-        
+
         categories = list(ProductCategory.objects.filter(is_active=True).values_list('name', flat=True))
         locations = list(SuitableLocation.objects.values_list('name', flat=True))
-        
+
         return Response({
             'categories': categories,
             'locations': locations
