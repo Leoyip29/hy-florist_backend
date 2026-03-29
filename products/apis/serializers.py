@@ -9,22 +9,6 @@ def _media_url(path: str | None, context: dict | None = None) -> str | None:
     if path.startswith("http://") or path.startswith("https://"):
         return path
     base = settings.API_BASE_URL
-    if not base or base == "http://localhost:8000":
-        req = context.get("request") if context else None
-        if req:
-            forwarded_host = req.META.get("HTTP_X_FORWARDED_HOST", "")
-            host = forwarded_host.strip()
-            # Strip scheme if present (some proxies send it in X-Forwarded-Host)
-            if host.startswith("http://"):
-                host = host[7:]
-            elif host.startswith("https://"):
-                host = host[8:]
-            # Strip trailing slash
-            host = host.rstrip("/")
-            if not host:
-                host = req.get_host()
-            proto = req.META.get("HTTP_X_FORWARDED_PROTO", "https" if req.is_secure() else "http")
-            base = f"{proto}://{host}"
     return f"{base}/media/{path.lstrip('/')}"
 
 
