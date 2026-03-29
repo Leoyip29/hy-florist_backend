@@ -20,7 +20,11 @@ class ProductListAPIView(ListAPIView):
     pagination_class = ProductPagination
 
     def get_queryset(self):
-        queryset = Product.objects.filter(is_active=True)
+        queryset = Product.objects.filter(is_active=True).prefetch_related(
+            'categories',
+            'images',
+            'options',
+        )
 
         # Get filter parameters
         category = self.request.query_params.get('category', None)
@@ -109,7 +113,11 @@ class ProductByIdsAPIView(ListAPIView):
         # Convert comma-separated string to list of integers
         try:
             ids_list = [int(id.strip()) for id in ids_param.split(',') if id.strip().isdigit()]
-            return Product.objects.filter(id__in=ids_list).order_by('id')
+            return Product.objects.filter(id__in=ids_list).prefetch_related(
+                'categories',
+                'images',
+                'options',
+            ).order_by('id')
         except ValueError:
             return Product.objects.none()
 

@@ -52,10 +52,15 @@ class ProductImageSerializer(serializers.ModelSerializer):
         return _media_url(obj.image.name if obj.image else None, self.context)
 
 
+# ── Child serializers must be defined BEFORE ProductListSerializer ──
+# to avoid circular-import issues. They reference self.context
+# (passed explicitly via SerializerMethodField in ProductListSerializer).
+
+
 class ProductListSerializer(serializers.ModelSerializer):
-    categories = ProductCategorySerializer(many=True)
-    images = ProductImageSerializer(many=True)
-    options = ProductOptionSerializer(many=True)
+    categories = serializers.SerializerMethodField()
+    images = serializers.SerializerMethodField()
+    options = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
@@ -69,3 +74,15 @@ class ProductListSerializer(serializers.ModelSerializer):
             "images",
             "options",
         ]
+
+    def get_categories(self, obj):
+        cats = getattr(obj, "categories", []).all() if hasattr(obj, "categories") else []
+        return ProductCategorySerializer(cats, many=True, context=self.context).data
+
+    def get_images(self, obj):
+        imgs = getattr(obj, "images", []).all() if hasattr(obj, "images") else []
+        return ProductImageSerializer(imgs, many=True, context=self.context).data
+
+    def get_options(self, obj):
+        opts = getattr(obj, "options", []).all() if hasattr(obj, "options") else []
+        return ProductOptionSerializer(opts, many=True, context=self.context).data
