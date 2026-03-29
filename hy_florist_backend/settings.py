@@ -13,7 +13,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 from datetime import timedelta
 from pathlib import Path
 import environ
-from django.conf import settings
+from corsheaders.defaults import default_headers
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -83,6 +83,10 @@ CORS_ALLOWED_ORIGINS = env.list(
         "http://localhost:3000",
     ],
 )
+CORS_ALLOW_HEADERS = [
+    *default_headers,
+    "x-forwarded-host",
+]
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:3000",
 ]
@@ -161,6 +165,15 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 # Media files (User uploaded content)
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+API_BASE_URL = env.str('API_BASE_URL', default='http://localhost:8000')
+
+# Image compression settings
+IMAGE_MAX_WIDTH = 1200
+IMAGE_MAX_HEIGHT = 1200
+IMAGE_QUALITY = 85
+IMAGE_OPTION_MAX_WIDTH = 800
+IMAGE_OPTION_MAX_HEIGHT = 800
+IMAGE_OPTION_QUALITY = 80
 
 
 # Stripe Settings

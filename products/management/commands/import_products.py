@@ -12,7 +12,6 @@ from django.core.files.uploadedfile import InMemoryUploadedFile
 from products.models import (
     Product,
     ProductCategory,
-    SuitableLocation,
     ProductImage,
 )
 
@@ -112,7 +111,6 @@ class Command(BaseCommand):
                     product_name = row[first_key].strip()
 
                     category_text = row["分類"]
-                    location_text = row["適合地點"]
                     price_text = row["價格"]
                     image_url = row["圖片"]
 
@@ -151,17 +149,6 @@ class Command(BaseCommand):
                         )
                         product.categories.add(category)
                         self.stdout.write(f"  📁 Added category: {cat_name}")
-
-                    # Suitable Locations (教堂 / 殯儀館 / 醫院)
-                    locations = [l.strip() for l in location_text.split("/")]
-                    product.suitable_locations.clear()  # Clear existing to avoid duplicates
-
-                    for loc_name in locations:
-                        location, _ = SuitableLocation.objects.get_or_create(
-                            name=loc_name
-                        )
-                        product.suitable_locations.add(location)
-                        self.stdout.write(f"  📍 Added location: {loc_name}")
 
                     # Handle Product Image
                     if image_url:

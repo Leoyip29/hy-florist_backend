@@ -1,4 +1,5 @@
 from django.db import models
+from django.conf import settings
 
 from utils.models import WithTimeStamps
 
@@ -6,15 +7,14 @@ from utils.models import WithTimeStamps
 # Product Category Model
 class ProductCategory(WithTimeStamps):
     name = models.CharField(max_length=100, unique=True)
-    # Active flag - can be disabled from admin
+    name_en = models.CharField(max_length=100, blank=True)
     is_active = models.BooleanField(default=True)
+    sort_order = models.IntegerField(default=0)
+    logo = models.ImageField(upload_to='categories/', null=True, blank=True)
+    logo_url = models.URLField(max_length=1000, null=True, blank=True)
 
-    def __str__(self):
-        return self.name
-
-# Suitable Location Model
-class SuitableLocation(WithTimeStamps):
-    name = models.CharField(max_length=100, unique=True)
+    class Meta:
+        ordering = ['sort_order', 'id']
 
     def __str__(self):
         return self.name
@@ -27,13 +27,12 @@ class Product(WithTimeStamps):
 
     # Hot seller flag - shows products at top when sorting by hot selling
     is_hot_seller = models.BooleanField(default=False)
-    
+
     # Active flag - can be disabled from admin
     is_active = models.BooleanField(default=True)
 
     # Relationships
     categories = models.ManyToManyField(ProductCategory, related_name='products')
-    suitable_locations = models.ManyToManyField(SuitableLocation, related_name='products')
 
     def __str__(self):
         return self.name
@@ -42,7 +41,6 @@ class Product(WithTimeStamps):
 class ProductImage(WithTimeStamps):
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='images')
     image = models.ImageField(upload_to='products/', null=True)
-    url = models.URLField(max_length=1000,null=True)
     alt_text = models.CharField(max_length=255, blank=True)
     is_primary = models.BooleanField(default=False)
 

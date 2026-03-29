@@ -4,9 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     {% if order.language == 'en' %}
-    <title>Order Confirmation - HY Florist</title>
+    <title>Order Confirmation - Hyacinth Florist</title>
     {% else %}
-    <title>訂單確認 - HY Florist</title>
+    <title>訂單確認 - Hyacinth Florist</title>
     {% endif %}
     <style>
         body { font-family: 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
@@ -48,11 +48,11 @@
     {% if order.language == 'en' %}
     <h2>Your Order is Confirmed</h2>
     <p>Dear {{ order.customer_name }},</p>
-    <p>Thank you for shopping at HY Florist. Your order has been confirmed and we will process it as soon as possible.</p>
+    <p>Thank you for shopping at Hyacinth Florist. Your order has been confirmed and we will process it as soon as possible.</p>
     {% else %}
     <h2>您的訂單已確認</h2>
     <p>親愛的 {{ order.customer_name }}，</p>
-    <p>感謝您在 HY Florist 購物。您的訂單已成功確認，我們將盡快為您處理。</p>
+    <p>感謝您在 Hyacinth Florist 購物。您的訂單已成功確認，我們將盡快為您處理。</p>
     {% endif %}
 
     <!-- Delivery Date Highlight -->

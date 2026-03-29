@@ -1,21 +1,17 @@
 from django import forms
 from django.contrib import admin
+from django.db import models
 
-from .models import Product, ProductCategory, SuitableLocation, ProductImage, ProductOption
+from .models import Product, ProductCategory, ProductImage, ProductOption
 
 
 class ProductImageForm(forms.ModelForm):
     class Meta:
         model = ProductImage
-        fields = ["url", "image", "alt_text", "is_primary"]
-        widgets = {
-            "url": forms.URLInput(attrs={"placeholder": "https://example.com/image.jpg"}),
-        }
+        fields = ["image", "alt_text", "is_primary"]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Make both URL and image fields optional
-        self.fields["url"].required = False
         self.fields["image"].required = False
 
 
@@ -23,7 +19,7 @@ class ProductImageInline(admin.TabularInline):
     model = ProductImage
     extra = 0
     form = ProductImageForm
-    fields = ["url", "image", "alt_text", "is_primary"]
+    fields = ["image", "alt_text", "is_primary"]
 
 
 class ProductOptionForm(forms.ModelForm):
@@ -49,14 +45,12 @@ class ProductOptionInline(admin.TabularInline):
 
 @admin.register(ProductCategory)
 class ProductCategoryAdmin(admin.ModelAdmin):
-    list_display = ("id", "name", "is_active", "created_at")
+    list_display = ("id", "name", "name_en", "sort_order", "is_active", "created_at")
     list_filter = ("is_active",)
-    search_fields = ("name",)
-
-
-@admin.register(SuitableLocation)
-class SuitableLocationAdmin(admin.ModelAdmin):
-    search_fields = ("name",)
+    search_fields = ("name", "name_en")
+    ordering = ("sort_order", "id")
+    list_editable = ("sort_order",)
+    fields = ("name", "name_en", "is_active", "sort_order", "logo", "logo_url")
 
 
 @admin.register(Product)
@@ -64,7 +58,7 @@ class ProductAdmin(admin.ModelAdmin):
     list_display = ("id", "name", "price", "is_active", "is_hot_seller", "created_at")
     list_filter = ("is_active", "is_hot_seller", "categories")
     search_fields = ("name",)
-    filter_horizontal = ("categories", "suitable_locations")
+    filter_horizontal = ("categories",)
     inlines = (ProductImageInline, ProductOptionInline)
 
 

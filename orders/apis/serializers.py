@@ -41,6 +41,7 @@ class OrderSerializer(serializers.ModelSerializer):
             'customer_name',
             'customer_email',
             'customer_phone',
+            'deceased_name',
             'delivery_address',
             'delivery_region',
             'delivery_district',
@@ -93,12 +94,24 @@ class CheckoutSerializer(serializers.Serializer):
         }
     )
 
+    # Deceased person's name
+    deceased_name = serializers.CharField(
+        max_length=255,
+        min_length=2,
+        required=True,
+        error_messages={
+            'min_length': 'Please enter the deceased name',
+            'required': 'Deceased name is required'
+        }
+    )
+
     # Delivery Information
     delivery_address = serializers.CharField(
         min_length=10,
+        required=False,
+        allow_blank=True,
         error_messages={
             'min_length': 'Please provide a complete address',
-            'required': 'Delivery address is required'
         }
     )
 
@@ -187,11 +200,12 @@ class CheckoutSerializer(serializers.Serializer):
 
     def calculate_order_total(self):
         subtotal = Decimal('0.00')
+        has_board_set = False
 
         for item_data in self.validated_data['items']:
             product = Product.objects.get(id=item_data['product_id'])
             quantity = item_data['quantity']
-            
+
             # Get selected option if provided
             selected_option_id = item_data.get('selected_option_id')
             if selected_option_id:
@@ -203,10 +217,26 @@ class CheckoutSerializer(serializers.Serializer):
                     price = Decimal(str(product.price))
             else:
                 price = Decimal(str(product.price))
-            
+
             subtotal += price * quantity
 
-        delivery_fee = Decimal('0.00')
+            # Check if product has board set category
+            for cat in product.categories.all():
+                if 'board set' in cat.name.lower() or 'board sets' in cat.name.lower() or '花牌套餐' in cat.name:
+                    has_board_set = True
+
+        total_item_count = sum(item_data['quantity'] for item_data in self.validated_data['items'])
+
+        # Free delivery if: 8+ items, OR contains board set
+        if has_board_set:
+            delivery_fee = Decimal('0.00')
+        elif total_item_count >= 8:
+            delivery_fee = Decimal('0.00')
+        elif total_item_count <= 1:
+            delivery_fee = Decimal('200.00')
+        else:
+            delivery_fee = Decimal('200.00') + Decimal('30.00') * (total_item_count - 1)
+
         discount = Decimal('0.00')
         total = subtotal + delivery_fee - discount
 
@@ -241,9 +271,6 @@ class CheckoutSerializer(serializers.Serializer):
             
             line_total = price * quantity
 
-            primary_image = product.images.filter(is_primary=True).first()
-            image_url = primary_image.url if primary_image else None
-
             order_items_data.append({
                 'product': product,
                 'product_name': product.name,
@@ -253,18 +280,19 @@ class CheckoutSerializer(serializers.Serializer):
                 'option_name': option_name,
             })
 
-        final_payment_method = payment_method or validated_data['payment_method']
+        final_payment_method = payment_method or validated_data.get('payment_method', 'whatsapp')
 
         with transaction.atomic():
             order = Order.objects.create(
                 customer_name=validated_data['customer_name'],
                 customer_email=validated_data['customer_email'],
                 customer_phone=validated_data['customer_phone'],
-                delivery_address=validated_data['delivery_address'],
+                deceased_name=validated_data.get('deceased_name', ''),
+                delivery_address=validated_data.get('delivery_address', ''),
                 delivery_region=validated_data.get('delivery_region', ''),
                 delivery_district=validated_data.get('delivery_district', ''),
                 delivery_notes=validated_data.get('delivery_notes', ''),
-                delivery_date=validated_data.get('delivery_date', ''),
+                delivery_date=validated_data.get('delivery_date'),
                 payment_method=final_payment_method,
                 stripe_payment_intent_id=stripe_payment_intent_id,
                 subtotal=subtotal,

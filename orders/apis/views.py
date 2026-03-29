@@ -83,7 +83,7 @@ class CreatePaymentIntentView(APIView):
                     'customer_name': serializer.validated_data['customer_name'],
                     'customer_email': serializer.validated_data['customer_email'],
                     'customer_phone': serializer.validated_data['customer_phone'],
-                    'integration': 'HY Florist',
+                    'integration': 'Hyacinth Florist',
                     'order_type': 'funeral_flowers',
                     'total_hkd': str(total_hkd),
                     'payment_currency': 'HKD',

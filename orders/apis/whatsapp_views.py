@@ -20,6 +20,7 @@ from django.utils.html import strip_tags
 from decimal import Decimal
 import urllib.parse
 import logging
+import traceback
 
 from .serializers import CheckoutSerializer
 from ..models import Order
@@ -27,41 +28,30 @@ from ..models import Order
 logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Region and District Name Mappings
+# Location Name Mappings (Funeral Parlours & Churches)
 # ─────────────────────────────────────────────────────────────────────────────
 
-HONG_KONG_REGIONS = {
-    'hong-kong-island': {'zh': '香港島', 'en': 'Hong Kong Island'},
-    'kowloon': {'zh': '九龍', 'en': 'Kowloon'},
-    'new-territories': {'zh': '新界', 'en': 'New Territories'},
-}
-
-HONG_KONG_DISTRICTS = {
-    'hong-kong-island': {
-        'central-and-western': {'zh': '中西區', 'en': 'Central & Western'},
-        'eastern': {'zh': '東區', 'en': 'Eastern'},
-        'southern': {'zh': '南區', 'en': 'Southern'},
-        'wan-chai': {'zh': '灣仔區', 'en': 'Wan Chai'},
-    },
-    'kowloon': {
-        'sham-shui-po': {'zh': '深水埗區', 'en': 'Sham Shui Po'},
-        'yau-tsim-mong': {'zh': '油尖旺區', 'en': 'Yau Tsim Mong'},
-        'shatin': {'zh': '沙田區', 'en': 'Sha Tin'},
-        'kowloon-city': {'zh': '九龍城區', 'en': 'Kowloon City'},
-        'wong-tai-sin': {'zh': '黃大仙區', 'en': 'Wong Tai Sin'},
-        'kwun-tong': {'zh': '觀塘區', 'en': 'Kwun Tong'},
-    },
-    'new-territories': {
-        'kwai-tsing': {'zh': '葵青區', 'en': 'Kwai Tsing'},
-        'tsuen-wan': {'zh': '荃灣區', 'en': 'Tsuen Wan'},
-        'tuen-mun': {'zh': '屯門區', 'en': 'Tuen Mun'},
-        'yuen-long': {'zh': '元朗區', 'en': 'Yuen Long'},
-        'north': {'zh': '北區', 'en': 'North'},
-        'tai-po': {'zh': '大埔區', 'en': 'Tai Po'},
-        'sha-tin': {'zh': '沙田區', 'en': 'Sha Tin'},
-        'sai-kung': {'zh': '西貢區', 'en': 'Sai Kung'},
-        'islands': {'zh': '離島區', 'en': 'Islands'},
-    },
+LOCATION_NAMES = {
+    # 殯儀館
+    "hk-island-hkf": {"zh": "香港殯儀館（北角）", "en": "Hong Kong Funeral Parlour (North Point)"},
+    "kowloon-world": {"zh": "世界殯儀館", "en": "World Funeral Parlour"},
+    "kowloon-international": {"zh": "萬國殯儀館", "en": "International Funeral Parlour"},
+    "kowloon-cosmos": {"zh": "寰宇殯儀館", "en": "Cosmos Funeral Parlour"},
+    "kowloon-kowloon": {"zh": "九龍殯儀館", "en": "Kowloon Funeral Parlour"},
+    "kowloon-diamond-hill": {"zh": "鑽石山殯儀館", "en": "Diamond Hill Funeral Parlour"},
+    "nt-po-fook": {"zh": "寶福紀念館（大圍）", "en": "Po Fook Memorial Hall (Sha Tin)"},
+    # 教堂
+    "kowloon-st-andrew": {"zh": "聖安德烈堂", "en": "St. Andrew's Church"},
+    "kowloon-st-john": {"zh": "聖公會聖匠堂", "en": "St. John's Church"},
+    "kowloon-shum-ao": {"zh": "中華基督教會深愛堂", "en": "Shum Ao Church"},
+    "hk-island-wan-chai": {"zh": "灣仔聯合教會國際禮拜堂", "en": "Wan Chai United Church International Chapel"},
+    "hk-island-north-point": {"zh": "北角衛斯理堂", "en": "North Point Wesley Church"},
+    "hk-island-pokfulam": {"zh": "薄扶林上路教堂", "en": "Pokfulam Road Church"},
+    "hk-island-hk-union": {"zh": "香港佑寧堂", "en": "Hong Kong Union Church"},
+    "tko-haven": {"zh": "靈實禮拜堂", "en": "Haven of Hope Chapel"},
+    "tko-st-john-baptist": {"zh": "施洗聖約翰堂", "en": "St. John the Baptist Church"},
+    "nt-tuen-mun": {"zh": "屯門神召會神學院", "en": "Tuen Mun Christian Academy"},
+    "nt-jockey-club": {"zh": "賽馬會善寧之家", "en": "Jockey Club Tseng's Home"},
 }
 
 
@@ -69,71 +59,90 @@ HONG_KONG_DISTRICTS = {
 # WhatsApp Link Builder
 # ─────────────────────────────────────────────────────────────────────────────
 
-def build_whatsapp_link(order_number: str, customer_name: str, amount_hkd: Decimal,
-                        items: list, delivery_address: str, delivery_region: str, delivery_district: str, delivery_date: str,
-                        language: str = 'en') -> dict:
+def build_whatsapp_link(
+        order_number: str,
+        customer_name: str,
+        deceased_name: str,
+        amount_hkd: Decimal,
+        subtotal: Decimal,
+        delivery_fee: Decimal,
+        items: list,
+        delivery_address: str,
+        delivery_region: str,
+        delivery_district: str,
+        delivery_date: str,
+        delivery_notes: str = '',
+        language: str = 'en',
+) -> dict:
     """
     Build a WhatsApp deep link that pre-fills the message with order details.
-    
-    WhatsApp Deep Link format:
-    https://wa.me/<phone>?text=<url-encoded-message>
-    
-    Or using the older format:
-    https://api.whatsapp.com/send?phone=<phone>&text=<url-encoded-message>
-    
-    Parameters:
-    - language: 'zh-HK' for Chinese, 'en' for English (default: 'en')
+    Bilingual format: Chinese and English side by side (中英對照)
     """
     # Get WhatsApp phone number from settings
     whatsapp_phone = getattr(settings, 'WHATSAPP_PHONE_NUMBER', '')
-    
+
     # Strip any non-digit characters
     phone_digits = ''.join(filter(str.isdigit, whatsapp_phone))
-    
-    # Build the order details message
-    items_text = "\n".join([
-        f"- {item.get('name', 'Product')}{' (' + item.get('option_name', '') + ')' if item.get('option_name') else ''} x{item.get('quantity', 1)}"
-        for item in items
-    ])
 
-    # Get translated region and district names
-    lang_key = 'zh' if language == 'zh-HK' else 'en'
-    region_name = HONG_KONG_REGIONS.get(delivery_region, {}).get(lang_key, delivery_region)
-    district_name = HONG_KONG_DISTRICTS.get(delivery_region, {}).get(delivery_district, {}).get(lang_key, delivery_district)
+    # Build per-item breakdown text (bilingual)
+    separator = "____________\n"
+    items_text_parts = []
+    for i, item in enumerate(items):
+        name_en = item.get('name', 'Product')
+        option_en = item.get('option_name', '')
+        name_zh = item.get('name_zh', name_en)
+        option_zh = item.get('option_name_zh', option_en)
 
-    # Build address with region and district
-    if district_name and district_name != delivery_district:
-        full_address = f"{delivery_address}\n({district_name}, {region_name})"
-    elif region_name and region_name != delivery_region:
-        full_address = f"{delivery_address}\n({region_name})"
+        item_lines = []
+        # Item header with both languages
+        item_lines.append(f"{i + 1}. {name_zh} / {name_en}")
+        if option_en:
+            item_lines.append(f"   ({option_zh} / {option_en})")
+        item_lines.append(f"   數量 Qty: {item.get('quantity', 1)}")
+        item_lines.append(f"   單價 Unit Price: HKD${item.get('unit_price', 0):.2f}")
+        item_lines.append(f"   小計 Subtotal: HKD${item.get('line_total', 0):.2f}")
+        items_text_parts.append("\n".join(item_lines))
+
+    items_text = separator + "\n".join(items_text_parts) + "\n" + separator
+
+    # Get translated location name (bilingual)
+    location_zh = LOCATION_NAMES.get(delivery_district, {}).get('zh', delivery_district)
+    location_en = LOCATION_NAMES.get(delivery_district, {}).get('en', delivery_district)
+
+    # Build address with location name (bilingual)
+    if location_en and location_en != delivery_district:
+        full_address = f"{delivery_address}\n({location_zh} / {location_en})"
     else:
-        full_address = delivery_address
+        full_address = f"{delivery_address}"
 
-    # Build message based on language
-    if language == 'zh-HK':
-        # Chinese message
-        message = (
-            f"新訂單 - 風信子花店\n\n"
-            f"訂單編號: {order_number}\n"
-            f"客戶姓名: {customer_name}\n"
-            f"總金額: HK${amount_hkd:.2f}\n\n"
-            f"訂單詳情:\n{items_text}\n\n"
-            f"送貨地址:\n{full_address}\n\n"
-            f"送貨日期:\n{delivery_date}\n\n"
-            f"請確認付款詳情。感謝您的訂單！"
-        )
-    else:
-        # English message
-        message = (
-            f"New Order - Hyacinth Florist\n\n"
-            f"Order Number: {order_number}\n"
-            f"Customer: {customer_name}\n"
-            f"Total Amount: HK${amount_hkd:.2f}\n\n"
-            f"Order Items:\n{items_text}\n\n"
-            f"Delivery Address:\n{full_address}\n\n"
-            f"Delivery Date:\n{delivery_date}\n\n"
-            f"Please confirm payment details. Thank you!"
-        )
+    # Delivery fee display
+    delivery_fee_text = "HKD$0" if delivery_fee == 0 else f"HKD${delivery_fee:.2f}"
+
+    # Build bilingual message (always show both Chinese and English)
+    message = (
+        f"🌸 新訂單 New Order - 風信子花店 Hyacinth Florist\n"
+        f"{separator}\n"
+        f"客戶姓名 Customer: {customer_name}\n"
+        f"先人姓名 Deceased: {deceased_name}\n"
+        f"{separator}\n"
+        f"送貨地址 Delivery Address:\n{full_address}\n\n"
+        f"送貨日期 Delivery Date: {delivery_date}\n"
+    )
+
+    # Notes section (bilingual)
+    if delivery_notes and delivery_notes.strip():
+        message += f"\n備註 Notes:\n{delivery_notes.strip()}\n"
+
+    message += (
+        f"{separator}\n"
+        f"{items_text}\n"
+        f"運費 Delivery Fee: {delivery_fee_text}\n"
+        f"小計 Subtotal: HKD${subtotal:.2f}\n"
+        f"總計 Total: HKD${amount_hkd:.2f}\n"
+        f"{separator}\n"
+        f"請確認付款詳情。感謝您的訂單！\n"
+        f"Please confirm payment details. Thank you!\n"
+    )
     
     # URL encode the message
     encoded_message = urllib.parse.quote(message, safe='')
@@ -183,32 +192,52 @@ class CreateWhatsAppOrderView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            # Get items for the WhatsApp message
+            # Get items for the WhatsApp message (with per-item pricing)
+            from products.models import Product, ProductOption
             items_data = []
             for item in serializer.validated_data.get('items', []):
                 product_id = item.get('product_id')
-                from products.models import Product
                 try:
                     product = Product.objects.get(id=product_id)
-                    product_name = product.name
+                    product_name_en = product.name
+                    # Try to get Chinese name from categories or use English name
+                    product_name_zh = product_name_en
+                    for cat in product.categories.all():
+                        if cat.name_en:
+                            product_name_zh = product_name_en
+                            break
                 except Product.DoesNotExist:
-                    product_name = f"Product #{product_id}"
-                
-                # Get option name if selected
-                option_name = None
+                    product_name_en = f"Product #{product_id}"
+                    product_name_zh = product_name_en
+                    product = None
+
+                quantity = item.get('quantity', 1)
+                unit_price = Decimal('0')
+                option_name_en = None
+                option_name_zh = None
+
                 selected_option_id = item.get('selected_option_id')
-                if selected_option_id:
+                if selected_option_id and product:
                     try:
-                        from products.models import ProductOption
                         option = ProductOption.objects.get(id=selected_option_id, product=product)
-                        option_name = option.name
+                        option_name_en = option.name
+                        option_name_zh = option.name  # Use same name if no Chinese version
+                        unit_price = Decimal(str(product.price)) + Decimal(str(option.price_adjustment))
                     except ProductOption.DoesNotExist:
-                        pass
-                
+                        unit_price = Decimal(str(product.price))
+                elif product:
+                    unit_price = Decimal(str(product.price))
+
+                line_total = unit_price * quantity
+
                 items_data.append({
-                    'name': product_name,
-                    'quantity': item.get('quantity', 1),
-                    'option_name': option_name,
+                    'name': product_name_en,
+                    'name_zh': product_name_zh,
+                    'quantity': quantity,
+                    'option_name': option_name_en,
+                    'option_name_zh': option_name_zh,
+                    'unit_price': unit_price,
+                    'line_total': line_total,
                 })
             
             # Create the order in PENDING state (not paid yet)
@@ -227,15 +256,25 @@ class CreateWhatsAppOrderView(APIView):
             
             # Build WhatsApp link
             language = serializer.validated_data.get('language', 'en')
+            # Use delivery_district as the address name if delivery_address is empty
+            raw_address = serializer.validated_data.get('delivery_address', '')
+            district = serializer.validated_data.get('delivery_district', '')
+            lang_key = 'zh' if language == 'zh-HK' else 'en'
+            if district and not raw_address:
+                raw_address = LOCATION_NAMES.get(district, {}).get(lang_key, district)
             whatsapp_data = build_whatsapp_link(
                 order_number=order.order_number,
                 customer_name=serializer.validated_data.get('customer_name', 'Customer'),
+                deceased_name=serializer.validated_data.get('deceased_name', ''),
                 amount_hkd=total_hkd,
+                subtotal=subtotal,
+                delivery_fee=delivery_fee,
                 items=items_data,
-                delivery_address=serializer.validated_data.get('delivery_address', ''),
+                delivery_address=raw_address,
                 delivery_region=serializer.validated_data.get('delivery_region', ''),
-                delivery_district=serializer.validated_data.get('delivery_district', ''),
+                delivery_district=district,
                 delivery_date=serializer.validated_data.get('delivery_date', ''),
+                delivery_notes=serializer.validated_data.get('delivery_notes', ''),
                 language=language,
             )
             
@@ -258,7 +297,7 @@ class CreateWhatsAppOrderView(APIView):
             })
             
         except Exception as e:
-            logger.error(f"WhatsApp order creation error: {str(e)}")
+            logger.error(f"WhatsApp order creation error: {str(e)}\n{traceback.format_exc()}")
             return Response(
                 {'error': '無法建立訂單，請稍後再試'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR

@@ -74,7 +74,7 @@ def build_payme_link(amount_hkd: Decimal, order_number: str, phone: str = None) 
     amount_dollars = float(amount_hkd)
 
     # Memo shown to the sender in PayMe — helps admin match the payment
-    memo = f"HY Florist Order {order_number}"
+    memo = f"Hyacinth Florist Order {order_number}"
 
     payme_phone = getattr(settings, 'PAYME_PHONE_NUMBER', '')
 

@@ -55,6 +55,14 @@ class Order(WithTimeStamps):
         help_text="Contact phone number"
     )
 
+    # Deceased person's name (relevant for funeral/church flower orders)
+    deceased_name = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        help_text="Name of the deceased person"
+    )
+
     # Delivery information
     delivery_address = models.TextField(
         help_text="Full delivery address"
