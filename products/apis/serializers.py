@@ -8,15 +8,7 @@ def _media_url(path: str | None, context: dict | None = None) -> str | None:
         return None
     if path.startswith("http://") or path.startswith("https://"):
         return path
-    req = context.get("request") if context else None
-    host = req.get_host() if req else None
-    allowed = {"app.hy-florist.hk", "hy-florist-h4g.onrender.com", "localhost", "127.0.0.1", "api.hy-florist.hk"}
-    if not host or not any(a in host for a in allowed):
-        host = settings.API_BASE_URL or "http://localhost:8000"
-    proto = "https" if (req and req.is_secure()) else "http"
-    base = f"{proto}://{host}"
-    if base.endswith("/"):
-        base = base[:-1]
+    base = settings.API_BASE_URL.rstrip("/")
     return f"{base}/media/{path.lstrip('/')}"
 
 
