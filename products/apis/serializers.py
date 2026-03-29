@@ -8,7 +8,14 @@ def _media_url(path: str | None, context: dict | None = None) -> str | None:
         return None
     if path.startswith("http://") or path.startswith("https://"):
         return path
-    base = settings.API_BASE_URL
+    req = context.get("request") if context else None
+    # Use the request's host so URLs work in both local and production
+    host = req.get_host() if req else settings.API_BASE_URL
+    proto = "https" if (req and req.is_secure()) else "http"
+    base = f"{proto}://{host}"
+    # Avoid double slashes
+    if base.endswith("/"):
+        base = base[:-1]
     return f"{base}/media/{path.lstrip('/')}"
 
 
