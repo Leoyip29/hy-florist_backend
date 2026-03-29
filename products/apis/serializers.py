@@ -11,7 +11,7 @@ def _media_url(path: str | None, context: dict | None = None) -> str | None:
     req = context.get("request") if context else None
     # In production (Render), X-Forwarded-Host may point to the frontend.
     # Only use the request host if it's our own backend domain.
-    allowed = {"app.hy-florist.hk", "hy-florist-h4g.onrender.com", "localhost", "127.0.0.1", "api.hy-florist.hk"}
+    allowed = {"app.hy-florist.hk",  "127.0.0.1"}
     host = req.get_host() if req else None
     if not host or not any(a in host for a in allowed):
         host = settings.API_BASE_URL or "http://localhost:8000"
@@ -38,10 +38,10 @@ class ProductCategorySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ProductCategory
-        fields = ["id", "name", "name_en", "logo", "logo_url"]
+        fields = ["id", "name", "name_en", "logo"]
 
     def get_logo(self, obj: "ProductCategory") -> str | None:
-        return _media_url(obj.logo_url, self.context) or _media_url(obj.logo.name if obj.logo else None, self.context)
+        return _media_url(obj.logo.name if obj.logo else None, self.context)
 
 
 class ProductImageSerializer(serializers.ModelSerializer):
