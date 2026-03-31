@@ -460,3 +460,32 @@ class StripeWebhookView(APIView):
                 logger.info(f"Webhook: marked {order.order_number} as refunded")
         except Order.DoesNotExist:
             logger.warning(f"Webhook: no order for refunded PI {pi_id}")
+
+
+class ValidateCheckoutView(APIView):
+    """
+    Validate checkout form data before payment.
+    Returns field-specific errors so frontend can highlight invalid fields.
+    """
+
+    def post(self, request):
+        serializer = CheckoutSerializer(data=request.data)
+        
+        if serializer.is_valid():
+            return Response({
+                'valid': True,
+                'errors': {}
+            })
+        
+        # Return field-specific errors
+        errors = {}
+        for field, messages in serializer.errors.items():
+            if isinstance(messages, list):
+                errors[field] = messages[0] if messages else f'{field} is invalid'
+            else:
+                errors[field] = str(messages)
+        
+        return Response({
+            'valid': False,
+            'errors': errors
+        }, status=status.HTTP_400_BAD_REQUEST)

@@ -7,6 +7,7 @@ from orders.apis.views import (
     ConfirmOrderView,
     OrderDetailView,
     StripeWebhookView,
+    ValidateCheckoutView,
 )
 
 urlpatterns = [
@@ -44,4 +45,11 @@ urlpatterns = [
 
     # WhatsApp
     path("orders/whatsapp/create/", CreateWhatsAppOrderView.as_view(), name="whatsapp_create_order"),
+
+    # Checkout Validation
+    path(
+        'orders/validate/',
+        ValidateCheckoutView.as_view(),
+        name='validate-checkout'
+    ),
 ]

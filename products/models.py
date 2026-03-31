@@ -11,13 +11,26 @@ class ProductCategory(WithTimeStamps):
     is_active = models.BooleanField(default=True)
     sort_order = models.IntegerField(default=0)
     logo = models.ImageField(upload_to='categories/', null=True, blank=True)
-    logo_url = models.URLField(max_length=1000, null=True, blank=True)
 
     class Meta:
         ordering = ['sort_order', 'id']
 
     def __str__(self):
         return self.name
+
+# Product Category Membership - enables per-category custom ordering
+class ProductCategoryMembership(WithTimeStamps):
+    product = models.ForeignKey('Product', on_delete=models.CASCADE, related_name='category_memberships')
+    category = models.ForeignKey('ProductCategory', on_delete=models.CASCADE, related_name='memberships')
+    display_order = models.IntegerField(default=0)
+
+    class Meta:
+        ordering = ['display_order', 'id']
+        unique_together = ('product', 'category')
+
+    def __str__(self):
+        return f"{self.product.name} in {self.category.name} (order: {self.display_order})"
+
 
 # Product Model
 class Product(WithTimeStamps):
@@ -31,7 +44,7 @@ class Product(WithTimeStamps):
     # Active flag - can be disabled from admin
     is_active = models.BooleanField(default=True)
 
-    # Relationships
+    # Relationships - original M2M preserved to avoid SQLite migration issues
     categories = models.ManyToManyField(ProductCategory, related_name='products')
 
     def __str__(self):

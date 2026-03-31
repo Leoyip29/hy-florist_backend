@@ -62,6 +62,8 @@ LOCATION_NAMES = {
 def build_whatsapp_link(
         order_number: str,
         customer_name: str,
+        customer_email: str,
+        customer_phone: str,
         deceased_name: str,
         amount_hkd: Decimal,
         subtotal: Decimal,
@@ -123,6 +125,8 @@ def build_whatsapp_link(
         f"🌸 新訂單 New Order - 風信子花店 Hyacinth Florist\n"
         f"{separator}\n"
         f"客戶姓名 Customer: {customer_name}\n"
+        f"電郵 Email: {customer_email}\n"
+        f"電話 Phone: {customer_phone}\n"
         f"先人姓名 Deceased: {deceased_name}\n"
         f"{separator}\n"
         f"送貨地址 Delivery Address:\n{full_address}\n\n"
@@ -265,6 +269,8 @@ class CreateWhatsAppOrderView(APIView):
             whatsapp_data = build_whatsapp_link(
                 order_number=order.order_number,
                 customer_name=serializer.validated_data.get('customer_name', 'Customer'),
+                customer_email=serializer.validated_data.get('customer_email', ''),
+                customer_phone=serializer.validated_data.get('customer_phone', ''),
                 deceased_name=serializer.validated_data.get('deceased_name', ''),
                 amount_hkd=total_hkd,
                 subtotal=subtotal,

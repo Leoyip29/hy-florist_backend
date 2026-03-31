@@ -2,7 +2,7 @@ from django import forms
 from django.contrib import admin
 from django.db import models
 
-from .models import Product, ProductCategory, ProductImage, ProductOption
+from .models import Product, ProductCategory, ProductImage, ProductOption, ProductCategoryMembership
 
 
 class ProductImageForm(forms.ModelForm):
@@ -73,3 +73,13 @@ class ProductOptionAdmin(admin.ModelAdmin):
     list_display = ("id", "product", "name", "name_en", "price_adjustment", "created_at")
     list_filter = ("product",)
     search_fields = ("name", "name_en", "product__name")
+
+
+@admin.register(ProductCategoryMembership)
+class ProductCategoryMembershipAdmin(admin.ModelAdmin):
+    list_display = ("id", "product", "category", "display_order", "updated_at")
+    list_filter = ("category",)
+    search_fields = ("product__name", "category__name")
+    ordering = ("category__sort_order", "category", "display_order", "id")
+    list_editable = ("display_order",)
+    raw_id_fields = ("product", "category")

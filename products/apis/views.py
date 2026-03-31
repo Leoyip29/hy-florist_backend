@@ -46,15 +46,28 @@ class ProductListAPIView(ListAPIView):
                 pass
 
         # Filter by category (supports both English name_en and Chinese name)
+        category_filtered = False
         if category and category.lower() != 'all' and category != '全部':
-            from products.models import ProductCategory
+            from products.models import ProductCategory, ProductCategoryMembership
+            from django.db.models import OuterRef, Subquery
+
             cats = ProductCategory.objects.filter(name_en=category, is_active=True)
             if not cats.exists():
                 cats = ProductCategory.objects.filter(name=category, is_active=True)
             if not cats.exists():
                 cats = ProductCategory.objects.filter(name__iexact=category, is_active=True)
             if cats.exists():
-                queryset = queryset.filter(categories__in=cats).distinct()
+                cat = cats.first()
+                # Use subquery to get display_order for the specific category
+                membership_order = ProductCategoryMembership.objects.filter(
+                    product=OuterRef('pk'),
+                    category=cat
+                ).values('display_order')[:1]
+                queryset = queryset.filter(categories__in=[cat]).distinct()
+                queryset = queryset.annotate(
+                    category_order=Subquery(membership_order)
+                )
+                category_filtered = True
 
         # Search by name or description
         if search:
@@ -72,6 +85,10 @@ class ProductListAPIView(ListAPIView):
 
         if sort == 'price_desc':
             return queryset.order_by('-price')
+
+        # For 'recommended' or no sort: use category_order if filtering by category, else median price
+        if category_filtered:
+            return queryset.order_by('category_order', 'id')
 
         # Default: medium price first, then cheapest to highest
         # Calculate median price from the queryset
