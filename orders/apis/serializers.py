@@ -3,7 +3,8 @@ from rest_framework import serializers
 from orders.models import OrderItem, Order
 from products.models import Product
 from decimal import Decimal
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
+from zoneinfo import ZoneInfo
 import re
 
 
@@ -313,19 +314,20 @@ class CheckoutSerializer(serializers.Serializer):
         return value
 
     def validate_delivery_date(self, value):
-        import re
         if value is None:
             raise serializers.ValidationError(self._get_error('delivery_date', 'required'))
 
-        today = date.today()
-        min_delivery_date = today + timedelta(days=2)
+        # Use Hong Kong time (UTC+8) to match user's local date picker
+        hkt = ZoneInfo('Asia/Hong_Kong')
+        hkt_today = datetime.now(hkt).date()
+        min_delivery_date = hkt_today + timedelta(days=2)
 
         if value < min_delivery_date:
             raise serializers.ValidationError(
                 self._get_error('delivery_date', 'min_days', date=min_delivery_date.strftime('%Y-%m-%d'))
             )
 
-        max_delivery_date = today + timedelta(days=90)
+        max_delivery_date = hkt_today + timedelta(days=90)
         if value > max_delivery_date:
             raise serializers.ValidationError(self._get_error('delivery_date', 'max_days'))
 
